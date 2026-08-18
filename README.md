@@ -3,7 +3,17 @@
 Automatic in-game box score for **Root – Ultimate Collection** in Tabletop
 Simulator: a walnut cardboard sheet that watches the real score markers on the
 real board and records a per-turn box score, following the TTS turn system.
-Spawn it from **Objects → Saved Objects → Root Box Score**.
+
+## Install
+
+Download the two files in [`out/`](out/) (`Root Box Score.json` and
+`Root Box Score.png`) into your Saved Objects folder:
+
+    Documents\My Games\Tabletop Simulator\Saves\Saved Objects
+
+then spawn it in-game from **Objects → Saved Objects → Root Box Score**. To
+export to Discord, paste a webhook URL once into **EDIT → DISCORD** (see
+below); it is saved with the object.
 
 ## Mechanics — exactly how it works
 
@@ -97,9 +107,9 @@ Spawn it from **Objects → Saved Objects → Root Box Score**.
     matter how the UI treats clicks; the parchment area additionally lets
     clicks through (`raycastTarget=false` on everything non-interactive), so
     in practice you can drag from anywhere that is not a button or field.
-12. **Fixed footprint.** Ten round columns are always shown (setup lets you
-    change the number), so the sheet keeps one size for a whole normal game
-    and only grows past round 10.
+12. **Fixed footprint.** Ten round columns are always shown, so the sheet
+    keeps one size for a whole normal game; it only grows automatically
+    when a game runs past round 10.
 13. **EDIT face** — the same sheet with everything editable in place, with a
     real cursor (fields are true input fields, centered like the printed
     text so nothing shifts when EDIT opens): player names, every score cell,
@@ -110,6 +120,7 @@ Spawn it from **Objects → Saved Objects → Root Box Score**.
     **character** picker (▼) for the Eyrie commander, Knaves captains or
     vagabond character (auto-filled when a known character card stands near
     the faction's supply; picked values always win), the Discord webhook,
+    the CRAFT toggle with its ITEMS editor (see the craft chapter below),
     and the unpicked faction: a picker over the full 13-faction roster, one
     click per faction, gold = unpicked. Unpicked cannot be auto-detected —
     in the group's draft, five cards are drawn and one is thrown away,
@@ -127,16 +138,11 @@ Spawn it from **Objects → Saved Objects → Root Box Score**.
     posts the formatted box score directly to the channel via `WebRequest`;
     the URL is part of the object's saved state, so it travels inside every
     save file — share table saves only with people who may post to your
-    channel. EXPORT
-    always also mirrors the full JSON record (metadata, rows, players,
-    variants, locks, edits, unpicked, event log) to the Notebook tab
-    `BoxScore`.
-16. **Optional local listener** (for files / clipboard / API development):
-    double-click **Start Export Listener.cmd** and each EXPORT additionally
-    lands as `exports/latest.json`, `exports/feed.jsonl` (line-per-event bot
-    feed), a timestamped snapshot, and a paste-ready text box score on the
-    Windows clipboard. Locked turns stream to it live. Everything works
-    without it.
+    channel.
+16. **Notebook mirror.** Every EXPORT also writes the full JSON record
+    (metadata, rows, players, variants, locks, edits, crafts, unpicked,
+    event log) to the Notebook tab `BoxScore` — machine-readable fuel for
+    any external analysis.
 
 ## Development
 
@@ -179,6 +185,7 @@ them.
 
 ## Ideas not built yet
 
-- Discord bot answering with the current box score (feed.jsonl is ready).
+- Discord bot answering with the current box score (the Notebook JSON
+  mirror is ready fuel).
 - Dominance state per row (today: type `D` into a cell in SETUP).
 - hoot3_video_analysis ingester for the exported JSON.

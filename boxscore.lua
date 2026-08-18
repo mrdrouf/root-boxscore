@@ -31,7 +31,6 @@ local ROW_TOL        = 0.13
 local COL_TOL        = 0.45
 local MIN_CELLS      = 28
 local MAX_CELLS      = 60
-local EXPORT_URL     = "http://127.0.0.1:8790/boxscore"
 local PX_PER_UNIT    = 100    -- TTS object-UI render density (measured on a
                               -- live table: the sheet drew 2.5x larger than a
                               -- slab sized with the documented 250)
@@ -599,14 +598,8 @@ local function exportPayload(kind, extra)
   return p
 end
 
-local function postOut(payload)
-  pcall(function()
-    WebRequest.post(EXPORT_URL, JSON.encode(payload), function() end)
-  end)
-end
-
 -- Post straight to a Discord webhook - no companion program needed. The URL
--- is pasted once into the SETUP "discord" field (or baked into GMNotes) and
+-- is pasted once into EDIT's DISCORD field (or baked into GMNotes) and
 -- then travels with the object inside every save.
 local function postDiscord(chunks)
   local hook = S.meta.hook or ""
@@ -1076,8 +1069,6 @@ local function lockRow(i)
     and math.floor(S.turns / math.max(1, #S.rows)) + 1 > S.hardRound then
     S.hardRound = nil
   end
-  postOut(exportPayload("lock", { locked = { faction = row.fac, round = r,
-    turn = S.turns, score = row.score } }))
   rebuildUI()
 end
 
@@ -1272,7 +1263,6 @@ function uiExport(player)
   local by = player and player.steam_name or ""
   S.exportBy = by
   local payload = exportPayload("export", { log = S.log, exportedBy = by })
-  postOut(payload)
   local toDiscord = postDiscord(fencedChunks(boxText()))
   local body = JSON.encode(payload)
   local title = "BoxScore"

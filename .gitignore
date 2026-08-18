@@ -1,4 +1,3 @@
-exports/
 __pycache__/
 *.pyc
 # posting credential - never commit

@@ -55,10 +55,9 @@ def block(lua, webhook=""):
         "Nickname": NAME,
         "Description": (
             "Automatic box score for Root - Ultimate Collection.\n"
-            "Reads each faction's VP marker on the map's score track. "
-            "END TURN locks the active faction's score for the round; "
-            "cells are editable for corrections; +/- moves the marker itself.\n"
-            "If the floating panel faces the wrong way, click spin."),
+            "Reads each faction's VP marker on the map's score track and "
+            "records a per-round box score, following the TTS turn system. "
+            "The INFO button on the sheet is the manual."),
         "GMNotes": webhook,
         "ColorDiffuse": PARCHMENT,
         "Locked": False,
