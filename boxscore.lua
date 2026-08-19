@@ -30,7 +30,10 @@ local BUILD = "dev"
 -- Flip at runtime with boxDebug(true) over the External Editor API.
 local DEBUG = false
 local function dbg(m) if DEBUG then log(m) end end
-function boxDebug(v) DEBUG = (v == true) end
+function boxDebug(v)
+  if type(v) == "table" then v = v[1] end
+  DEBUG = (v == true)
+end
 local POLL_SECONDS   = 1.2
 local SNAP_MIN       = 40
 local ROW_TOL        = 0.13
