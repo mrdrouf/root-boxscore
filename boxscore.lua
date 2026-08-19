@@ -379,15 +379,30 @@ end
 -- The point that marks a faction's play area: its supply bag when one
 -- exists. Some kits name theirs differently (the Rats play from the
 -- "Hundreds Supply", the Crows from the "Corvid Supply", the Badgers from
--- the "Keeper Supply" - verified against the mod's own spawn data), and the
--- Vagabond has no supply at all: his named character figurine
--- ("Vagabond - Thief", ...) anchors his area instead.
+-- the "Keeper Supply" - verified against the mod's own spawn data). The
+-- Vagabond has no supply at all: his FACTION BOARD anchors him, identified
+-- by its artwork since boards carry no usable name - the board never moves
+-- once set up, unlike his pawn, which wanders the map (and can do so before
+-- the VP marker ever reaches the track). The named pawn figurine
+-- ("Vagabond - Thief", ...) is only a last resort.
 local SUPPLY_ALIAS = { Rats = "Hundreds", Crows = "Corvid", Badgers = "Keeper" }
+local BOARD_ART = {
+  Vagabond = "E9FFF39312426A1A13695C984510BB94B663436F",
+}
 
 local function facAnchor(fac, byName)
   local o = byName[fac .. " Supply"]
   if o == nil and SUPPLY_ALIAS[fac] ~= nil then
     o = byName[SUPPLY_ALIAS[fac] .. " Supply"]
+  end
+  if o == nil and BOARD_ART[fac] ~= nil then
+    for _, c in ipairs(getAllObjects()) do
+      local img = markerImage(c)
+      if img ~= "" and img:find(BOARD_ART[fac], 1, true) then
+        o = c
+        break
+      end
+    end
   end
   if o == nil then
     local pre = fac .. " - "

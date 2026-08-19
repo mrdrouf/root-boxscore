@@ -68,7 +68,9 @@ below); it is saved with the object.
    convention) — with the mod's naming quirks handled: the Rats' bag is the
    "Hundreds Supply", the Crows' the "Corvid Supply", the Badgers' the
    "Keeper Supply" — and the Vagabond, who has no supply at all, is anchored
-   by his named character figurine ("Vagabond - Thief", …). The tool
+   by his faction board, identified by its artwork (boards carry no usable
+   name; the board never moves during play, unlike his pawn, which wanders
+   the map — the named pawn figurine is only a last-resort anchor). The tool
    measures the distance from every seated player's hand zone to every
    playing faction's anchor and pairs them nearest-first, one-to-one. That pairing gives
    each row its player color and Steam name (typed names always win over
@@ -169,7 +171,7 @@ sitting in the map's craftable-item supply (the edge opposite the score
 track; the tiles are unnamed in this mod, so they are identified by their
 artwork). An item leaving the supply goes "in flight"; it is attributed the
 moment it settles beside a faction's board (nearest faction anchor within
-30 units — the supply bag, or the Vagabond's character figurine) — the
+30 units — the supply bag, or the Vagabond's faction board) — the
 destination is final, later movement is never revisited.
 Returning an item to the map supply cancels the craft. A catch-up sweep on
 arming adopts items already sitting beside boards. The craft's round is the
