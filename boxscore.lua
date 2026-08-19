@@ -25,6 +25,12 @@
 
 ------------------------------------------------------------------ constants --
 local BUILD = "dev"
+-- log() is NOT editor-only: it also lands in the in-game chat log, so every
+-- debug message must stay behind this gate (the sheet is silent by contract).
+-- Flip at runtime with boxDebug(true) over the External Editor API.
+local DEBUG = false
+local function dbg(m) if DEBUG then log(m) end end
+function boxDebug(v) DEBUG = (v == true) end
 local POLL_SECONDS   = 1.2
 local SNAP_MIN       = 40
 local ROW_TOL        = 0.13
@@ -142,6 +148,7 @@ local S = {
 }
 
 local TRACK = nil
+local lastTrackLogged = nil
 local pollCount = 0
 
 ------------------------------------------------------------------- utilities --
@@ -284,10 +291,13 @@ local function findTrack()
       local auto = MAP_NAMES[urlTail(img)]
       if auto and auto ~= "" then S.meta.map = auto end
     end
-    log("BoxScore: track on " .. TRACK.guid .. " axis=" .. TRACK.axis
-      .. " cells=" .. TRACK.n .. " rows=" .. #TRACK.rows)
+    if TRACK.guid ~= lastTrackLogged then
+      lastTrackLogged = TRACK.guid
+      dbg("BoxScore: track on " .. TRACK.guid .. " axis=" .. TRACK.axis
+        .. " cells=" .. TRACK.n .. " rows=" .. #TRACK.rows)
+    end
   else
-    log("BoxScore: no score track found on any snap holder")
+    dbg("BoxScore: no score track found on any snap holder")
   end
 end
 
@@ -670,7 +680,7 @@ local function postDiscord(chunks)
     local function report(req)
       if req and (req.is_error or (req.response_code or 0) >= 300) then
         S.lastExport = os.date("%H:%M") .. " &#183; Discord failed (msg " .. idx .. ")"
-        log("BoxScore discord error: " .. tostring(req.error) .. " code="
+        dbg("BoxScore discord error: " .. tostring(req.error) .. " code="
           .. tostring(req.response_code) .. " body=" .. tostring(req.text):sub(1, 200))
         rebuildUI()
       else
@@ -763,7 +773,7 @@ local function initItemWatch()
       end
     end
   end
-  log("BoxScore experimental: watching " .. count .. " supply items")
+  dbg("BoxScore experimental: watching " .. count .. " supply items")
 end
 
 -- the item's crafting VP: the faction's first score increase since the item
@@ -988,7 +998,7 @@ local function poll()
           INFLIGHT[guid] = { name = w.name, img = w.img, holder = w.holder,
             tLeft = now(),
             activeFac = S.rows[S.active] and S.rows[S.active].fac or nil }
-          log("EXP leave: " .. w.name .. " " .. guid)
+          dbg("EXP leave: " .. w.name .. " " .. guid)
         end
       end
       -- a crafted item put BACK in the supply was a mistake: undo the craft
@@ -1027,7 +1037,7 @@ local function poll()
               local d = dx * dx + dz * dz
               if d < bestD then bestFac, bestD = fac, d end
             end
-            log("EXP inflight " .. guid .. " bestFac=" .. tostring(bestFac)
+            dbg("EXP inflight " .. guid .. " bestFac=" .. tostring(bestFac)
               .. " supplies=" .. tostring((function() local c = 0
                 for _ in pairs(SUPPLYPOS) do c = c + 1 end
                 return c end)()))
@@ -1133,7 +1143,7 @@ end
 function uiEndTurn() lockActive() end
 
 function onPlayerTurn(player, previous)
-  log("BoxScore onPlayerTurn: now=" .. tostring(player and player.color)
+  dbg("BoxScore onPlayerTurn: now=" .. tostring(player and player.color)
     .. " prev=" .. tostring(previous and previous.color)
     .. " coverage=" .. tostring(fullTurnCoverage()))
   -- ONE lock source per mode: with full coverage the event locks; in every
@@ -1170,7 +1180,7 @@ local function nudge(i, delta)
   local row = S.rows[i]
   if row == nil or TRACK == nil then return end
   local m = findMarker(row)
-  if m == nil then log("BoxScore: cannot find " .. row.fac .. " VP") return end
+  if m == nil then dbg("BoxScore: cannot find " .. row.fac .. " VP") return end
   if m.held_by_color ~= nil then return end
   local base = row.score >= 0 and row.score or 0
   local target = row.score >= 0 and (base + delta) or 0
@@ -1325,7 +1335,7 @@ function uiExport(player)
   if not done then Notes.addNotebookTab({ title = title, body = body }) end
   S.lastExport = os.date("%H:%M")
     .. (toDiscord and " &#183; discord&#8230;" or " (no webhook set)")
-  log("BoxScore: exported" .. (toDiscord and " (discord)" or ""))
+  dbg("BoxScore: exported" .. (toDiscord and " (discord)" or ""))
   rebuildUI()
 end
 
