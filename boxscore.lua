@@ -330,13 +330,20 @@ end
 local function findMarker(row)
   local o = row.guid and getObjectFromGUID(row.guid) or nil
   if o ~= nil and (o.getName() or "") == (row.fac .. " VP") then return o end
+  -- cached marker gone: re-find by name. Some kits spawn a spare copy (the
+  -- Vagabond's does), so prefer the one standing on the score track.
+  local loose = nil
   for _, c in ipairs(getAllObjects()) do
     if (c.getName() or "") == (row.fac .. " VP") then
-      row.guid = c.getGUID()
-      return c
+      if readCell(c) ~= nil then
+        row.guid = c.getGUID()
+        return c
+      end
+      if loose == nil then loose = c end
     end
   end
-  return nil
+  if loose ~= nil then row.guid = loose.getGUID() end
+  return loose
 end
 
 -- Track orientation is NOT inferred: on every map in this mod the printed 0
@@ -369,6 +376,32 @@ local function addRow(fac, obj)
   S.unpicked[fac] = nil   -- a playing faction cannot be the unpicked one
 end
 
+-- The point that marks a faction's play area: its supply bag when one
+-- exists. Some kits name theirs differently (the Rats play from the
+-- "Hundreds Supply", the Crows from the "Corvid Supply", the Badgers from
+-- the "Keeper Supply" - verified against the mod's own spawn data), and the
+-- Vagabond has no supply at all: his named character figurine
+-- ("Vagabond - Thief", ...) anchors his area instead.
+local SUPPLY_ALIAS = { Rats = "Hundreds", Crows = "Corvid", Badgers = "Keeper" }
+
+local function facAnchor(fac, byName)
+  local o = byName[fac .. " Supply"]
+  if o == nil and SUPPLY_ALIAS[fac] ~= nil then
+    o = byName[SUPPLY_ALIAS[fac] .. " Supply"]
+  end
+  if o == nil then
+    local pre = fac .. " - "
+    for _, c in ipairs(getAllObjects()) do
+      local n = c.getName() or ""
+      if n:sub(1, #pre) == pre or n:sub(1, #pre - 1) == (fac .. " -") then
+        o = c
+        break
+      end
+    end
+  end
+  return o
+end
+
 -- Best effort: find the chosen vagabond character / captain card standing
 -- near the faction's supply. Fills the variant only while it is auto-managed;
 -- a hand-typed variant always wins.
@@ -376,12 +409,13 @@ local function refreshVariants(byName)
   local changed = false
   for _, row in ipairs(S.rows) do
     if row.variantAuto ~= false then
-      local bag = byName[row.fac .. " Supply"]
+      local bag = facAnchor(row.fac, byName)
       if bag then
         local bp = bag.getPosition()
         local best, bestD = nil, 18 * 18
         for _, ch in ipairs(CHARS) do
-          local o = byName[ch]
+          local o = byName[ch] or byName["Vagabond - " .. ch]
+            or byName["Vagabond -" .. ch]
           if o then
             local op = o.getPosition()
             local dx, dz = op.x - bp.x, op.z - bp.z
@@ -468,7 +502,7 @@ local function refreshSeats(byName)
   if #hands == 0 then return false end
   local cand = {}
   for _, row in ipairs(S.rows) do
-    local bag = byName[row.fac .. " Supply"]
+    local bag = facAnchor(row.fac, byName)
     if bag then
       local bp = bag.getPosition()
       for _, h in ipairs(hands) do
@@ -1013,7 +1047,7 @@ local function poll()
     end
     SUPPLYPOS = {}
     for _, row in ipairs(S.rows) do
-      local bag = byName[row.fac .. " Supply"]
+      local bag = facAnchor(row.fac, byName)
       if bag then SUPPLYPOS[row.fac] = bag.getPosition() end
     end
     if refreshSeats(byName) then dirty = true end

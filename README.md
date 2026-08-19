@@ -63,10 +63,14 @@ below); it is saved with the object.
    loaded because the marker is on the table.
 
 6. **Which player plays which faction?** By board position, as at a real
-   table: each faction's supply bag (`"<Faction> Supply"`, a mod convention)
-   sits with the faction board in front of a seat. The tool measures the
-   distance from every seated player's hand zone to every playing faction's
-   supply bag and pairs them nearest-first, one-to-one. That pairing gives
+   table: each faction's *anchor* sits with the faction board in front of a
+   seat. The anchor is the faction's supply bag (`"<Faction> Supply"`, a mod
+   convention) — with the mod's naming quirks handled: the Rats' bag is the
+   "Hundreds Supply", the Crows' the "Corvid Supply", the Badgers' the
+   "Keeper Supply" — and the Vagabond, who has no supply at all, is anchored
+   by his named character figurine ("Vagabond - Thief", …). The tool
+   measures the distance from every seated player's hand zone to every
+   playing faction's anchor and pairs them nearest-first, one-to-one. That pairing gives
    each row its player color and Steam name (typed names always win over
    auto-filled ones).
 
@@ -164,8 +168,9 @@ EDIT has a **CRAFT** toggle. While on, the sheet memorizes every item tile
 sitting in the map's craftable-item supply (the edge opposite the score
 track; the tiles are unnamed in this mod, so they are identified by their
 artwork). An item leaving the supply goes "in flight"; it is attributed the
-moment it settles beside a faction's board (nearest faction supply within
-30 units) — the destination is final, later movement is never revisited.
+moment it settles beside a faction's board (nearest faction anchor within
+30 units — the supply bag, or the Vagabond's character figurine) — the
+destination is final, later movement is never revisited.
 Returning an item to the map supply cancels the craft. A catch-up sweep on
 arming adopts items already sitting beside boards. The craft's round is the
 round in play when the item left the supply (the crafting faction's last
