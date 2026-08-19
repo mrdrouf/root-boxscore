@@ -944,6 +944,10 @@ local dirty = false
 
 local function poll()
   pollCount = pollCount + 1
+  -- a swapped-out map is noticed at once: the cached track dies with its
+  -- object, dropping detection back into the fast every-poll regime (the
+  -- slow 30s rescan only covers a replacement while the old map remains)
+  if TRACK ~= nil and getObjectFromGUID(TRACK.guid) == nil then TRACK = nil end
   if TRACK == nil or (pollCount % 25 == 0) then
     local old = TRACK and TRACK.guid or "?"
     findTrack()
