@@ -944,14 +944,18 @@ local dirty = false
 
 local function poll()
   pollCount = pollCount + 1
-  -- a swapped-out map is noticed at once: the cached track dies with its
-  -- object, dropping detection back into the fast every-poll regime (the
-  -- slow 30s rescan only covers a replacement while the old map remains)
-  if TRACK ~= nil and getObjectFromGUID(TRACK.guid) == nil then TRACK = nil end
-  if TRACK == nil or (pollCount % 25 == 0) then
-    local old = TRACK and TRACK.guid or "?"
+  -- Track detection does no steady-state work. The every-poll scan runs
+  -- only until the first map is found; afterwards the sole periodic cost
+  -- is one object lookup every 25th poll, and a full re-detection happens
+  -- only when the mapped object has actually been deleted (a map swap).
+  -- A stale map NAME is acceptable - the MAP chip in EDIT corrects it.
+  if TRACK ~= nil and pollCount % 25 == 0
+    and getObjectFromGUID(TRACK.guid) == nil then
+    TRACK = nil
+  end
+  if TRACK == nil then
     findTrack()
-    if TRACK and TRACK.guid ~= old then dirty = true end
+    if TRACK ~= nil then dirty = true end
   end
   if TRACK == nil then return end
 
