@@ -969,7 +969,7 @@ local function poll()
     end
   end
 
-  for _, row in ipairs(S.rows) do
+  for ri, row in ipairs(S.rows) do
     local m = findMarker(row)
     local idx = m and readCell(m) or nil
     if idx ~= nil then
@@ -977,6 +977,22 @@ local function poll()
       if sc ~= row.score then
         logev("score", row.fac, row.score, sc)
         row.score = sc
+        dirty = true
+      end
+      -- Reaching 30 ends the game: the winner's score is recorded at once,
+      -- as if their turn had passed - and exactly once; afterwards nothing
+      -- locks any more. Moving that marker off 30 again means it was a
+      -- mistake: the record is erased and play resumes as if nothing
+      -- happened.
+      if S.winner == nil and sc >= 30 then
+        lockRow(ri)
+        S.winner = row.fac
+        logev("gameover", row.fac)
+        dirty = true
+      elseif S.winner == row.fac and sc < 30 then
+        S.winner = nil
+        logev("resume", row.fac)
+        uiUndo()
         dirty = true
       end
     end
@@ -1102,6 +1118,8 @@ end
 local function lockRow(i)
   local row = S.rows[i]
   if row == nil then return end
+  -- the game is over once someone reached 30: nothing locks any more
+  if S.winner ~= nil then return end
   -- re-read the marker right now: the polled score can be a beat stale, and a
   -- lock is forever (it is what gets exported)
   local m = findMarker(row)
@@ -1144,6 +1162,7 @@ end
 
 -- With full coverage the TTS turn system locks turns; otherwise END TURN.
 local function lockActive()
+  if S.winner ~= nil then return end
   if #S.rows == 0 or fullTurnCoverage() then return end
   if S.active > #S.rows then S.active = 1 end
   local i = S.active
@@ -1282,6 +1301,7 @@ function uiReset()
   S.active = 1
   S.turns = 0
   S.hardRound = nil
+  S.winner = nil
   S.undo = {}
   S.log = {}
   S.unpicked = {}
@@ -1942,7 +1962,7 @@ function rebuildUI()
     end
     add('</VerticalLayout></Panel>')
   elseif S.overlay == "info" then
-    add('<Panel width="' .. (W - 110) .. '" height="406" color="' .. WALNUT .. '">')
+    add('<Panel width="' .. (W - 110) .. '" height="420" color="' .. WALNUT .. '">')
     add('<VerticalLayout padding="20 20 14 10" spacing="3">')
     local function section(t, h, b, last)
       add('<Text fontSize="12" fontStyle="Bold" color="' .. GOLD .. '" preferredHeight="17"'
@@ -1953,8 +1973,8 @@ function rebuildUI()
         add('<Panel preferredHeight="1" color="#C9A05C50"' .. NOClick .. '/>')
       end
     end
-    section("SCORES", 16,
-      "Read automatically from the VP markers on the score track. The + and &#8722; buttons move the marker itself.")
+    section("SCORES", 30,
+      "Read automatically from the VP markers on the score track. The + and &#8722; buttons move the marker itself. A marker reaching 30 records that faction's score at once &#8211; the game is over and nothing further locks; move it off 30 to undo a mistake and resume.")
     section("TURNS", 44,
       "Everything runs automatically once the TTS turn order is set and every faction has its seated player: each turn pass records the finishing faction by itself. Without that, END TURN records the highlighted faction. Each turn fills the first empty round column.")
     section("EDIT", 44,

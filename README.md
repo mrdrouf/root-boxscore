@@ -90,7 +90,11 @@ below); it is saved with the object.
    stale value) and writes the score into the first visibly-empty round
    column. A manual END TURN button appears only when that coverage is
    missing (solo, hotseat, observers) — never both at once, no double
-   emploi.
+   emploi. A marker reaching 30 ends the game: that faction's score is
+   recorded immediately, as if its turn had passed, and nothing further
+   locks — exactly once. Moving that marker off 30 again means it was a
+   mistake: the recorded score is erased and play resumes as if nothing
+   had happened.
 9. **Declaring the round.** In EDIT, clicking a round-column number declares
    "we are in round N", and that declaration is authoritative: every
    faction's next lock lands exactly in column N, overwriting whatever the
