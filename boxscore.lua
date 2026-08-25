@@ -942,6 +942,10 @@ end
 ------------------------------------------------------------------- the poll --
 local dirty = false
 
+-- forward declaration: the poll's reaching-30 check locks the winner, but
+-- lockRow's definition needs the poll-adjacent helpers above it
+local lockRow
+
 local function poll()
   pollCount = pollCount + 1
   -- Track detection does no steady-state work. The every-poll scan runs
@@ -1115,7 +1119,7 @@ local function poll()
 end
 
 ------------------------------------------------------------------ turn flow --
-local function lockRow(i)
+function lockRow(i)
   local row = S.rows[i]
   if row == nil then return end
   -- the game is over once someone reached 30: nothing locks any more
