@@ -942,8 +942,7 @@ end
 ------------------------------------------------------------------- the poll --
 local dirty = false
 
--- forward declaration: the poll's reaching-30 check locks the winner, but
--- lockRow's definition needs the poll-adjacent helpers above it
+-- forward declaration, so anything above lockRow's definition can call it
 local lockRow
 
 local function poll()
@@ -983,20 +982,38 @@ local function poll()
         row.score = sc
         dirty = true
       end
-      -- Reaching 30 ends the game: the winner's score is recorded at once,
-      -- as if their turn had passed - and exactly once; afterwards nothing
-      -- locks any more. Moving that marker off 30 again means it was a
-      -- mistake: the record is erased and play resumes as if nothing
-      -- happened.
+      -- Reaching 30 ends the game: the 30 is printed into the CURRENT
+      -- round column and the world stops - the turn does NOT pass, the
+      -- pointer does not move, nothing locks any more. Moving that marker
+      -- off 30 to a lower score means it was a mistake: the cell returns
+      -- to exactly what it held before and play resumes.
       if S.winner == nil and sc >= 30 then
-        lockRow(ri)
+        local r = math.max(1, math.floor(S.turns / math.max(1, #S.rows)) + 1)
+        S.winnerLock = { fac = row.fac, r = r,
+          prevLock = row.locks[r], prevEdit = row.edits[tostring(r)] }
+        row.edits[tostring(r)] = nil
+        while #row.locks < r - 1 do table.insert(row.locks, -1) end
+        row.locks[r] = sc
         S.winner = row.fac
-        logev("gameover", row.fac)
+        logev("gameover", row.fac, r, sc)
         dirty = true
       elseif S.winner == row.fac and sc < 30 then
+        local wl = S.winnerLock
+        if wl ~= nil and wl.fac == row.fac then
+          if wl.prevLock ~= nil then
+            row.locks[wl.r] = wl.prevLock
+          else
+            row.locks[wl.r] = -1
+            while #row.locks > 0
+              and (row.locks[#row.locks] == -1 or row.locks[#row.locks] == nil) do
+              table.remove(row.locks)
+            end
+          end
+          if wl.prevEdit ~= nil then row.edits[tostring(wl.r)] = wl.prevEdit end
+        end
         S.winner = nil
+        S.winnerLock = nil
         logev("resume", row.fac)
-        uiUndo()
         dirty = true
       end
     end
@@ -1135,21 +1152,12 @@ function lockRow(i)
       row.score = sc
     end
   end
-  -- the lock lands in the first visibly-empty column at or after the
-  -- declared round: padding blanks count as empty and are overwritten, so a
-  -- lock can never skip past cells that look empty
-  local declared = math.floor(S.turns / math.max(1, #S.rows)) + 1
-  local r = math.max(1, declared)
-  if S.hardRound == declared then
-    -- the round was declared by hand (column number clicked in EDIT): the
-    -- lock lands exactly there, overwriting whatever the cell holds
-    row.edits[tostring(r)] = nil
-  else
-    while (row.locks[r] ~= nil and row.locks[r] ~= -1)
-      or (row.edits[tostring(r)] ~= nil and row.edits[tostring(r)] ~= "") do
-      r = r + 1
-    end
-  end
+  -- The HIGHLIGHTED round column is the single truth for where a lock
+  -- lands: the lock goes exactly there, overwriting whatever the cell
+  -- holds (lock or hand edit). A wrong column is corrected by clicking
+  -- the right column number in EDIT, never by the sheet second-guessing.
+  local r = math.max(1, math.floor(S.turns / math.max(1, #S.rows)) + 1)
+  row.edits[tostring(r)] = nil
   while #row.locks < r - 1 do
     table.insert(row.locks, -1)
   end
@@ -1157,10 +1165,6 @@ function lockRow(i)
   table.insert(S.undo, { fac = row.fac, r = r })
   logev("lock", row.fac, r, row.score)
   S.turns = S.turns + 1
-  if S.hardRound ~= nil
-    and math.floor(S.turns / math.max(1, #S.rows)) + 1 > S.hardRound then
-    S.hardRound = nil
-  end
   rebuildUI()
 end
 
@@ -1304,8 +1308,8 @@ function uiReset()
   S.rows = {}
   S.active = 1
   S.turns = 0
-  S.hardRound = nil
   S.winner = nil
+  S.winnerLock = nil
   S.undo = {}
   S.log = {}
   S.unpicked = {}
@@ -1492,9 +1496,8 @@ function uiRowBtn(player, _, id)
     rebuildUI()
   elseif kind == "colh" then
     -- clicking a round-column number in setup declares "we are in round i";
-    -- every faction's next lock lands in that very column, overwriting
+    -- locks always land in the declared (highlighted) column
     S.turns = (i - 1) * math.max(1, #S.rows)
-    S.hardRound = i
     logev("setturn", nil, S.turns)
     rebuildUI()
   end
@@ -1980,7 +1983,7 @@ function rebuildUI()
     section("SCORES", 30,
       "Read automatically from the VP markers on the score track. The + and &#8722; buttons move the marker itself. A marker reaching 30 records that faction's score at once &#8211; the game is over and nothing further locks; move it off 30 to undo a mistake and resume.")
     section("TURNS", 44,
-      "Everything runs automatically once the TTS turn order is set and every faction has its seated player: each turn pass records the finishing faction by itself. Without that, END TURN records the highlighted faction. Each turn fills the first empty round column.")
+      "Everything runs automatically once the TTS turn order is set and every faction has its seated player: each turn pass records the finishing faction by itself. Without that, END TURN records the highlighted faction. A lock always writes the highlighted round column, overwriting whatever it holds.")
     section("EDIT", 44,
       "Correct anything: scores (click a cell), the round (click a column number), whose turn it is (click a portrait), faction order (&#9650;), player names, the Eyrie commander / Knaves captains / vagabond character (&#9660;), map, deck, game name and the unpicked faction.")
     section("EXPORT", 30,

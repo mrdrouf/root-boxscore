@@ -87,21 +87,22 @@ below); it is saved with the object.
 8. **Locking.** While the TTS turn system runs *and* every faction row has
    its seated player, the turn system is the single lock source: each turn
    pass re-reads the finishing faction's marker at that instant (never a
-   stale value) and writes the score into the first visibly-empty round
-   column. A manual END TURN button appears only when that coverage is
-   missing (solo, hotseat, observers) — never both at once, no double
-   emploi. A marker reaching 30 ends the game: that faction's score is
-   recorded immediately, as if its turn had passed, and nothing further
-   locks — exactly once. Moving that marker off 30 again means it was a
-   mistake: the recorded score is erased and play resumes as if nothing
-   had happened.
+   stale value). A manual END TURN button appears only when that coverage
+   is missing (solo, hotseat, observers) — never both at once, no double
+   emploi. **A lock always lands in the highlighted round column**,
+   overwriting whatever the cell holds — the highlighted turn number is
+   the single truth for where scores print; the sheet never second-guesses
+   it by skipping to another column. A marker reaching 30 ends the game:
+   the 30 is printed into the current round column and the world stops —
+   the turn does not pass and nothing further locks, exactly once. Moving
+   that marker off 30 to a lower score means it was a mistake: the cell
+   returns to exactly what it held before and play resumes.
 9. **Declaring the round.** In EDIT, clicking a round-column number declares
-   "we are in round N", and that declaration is authoritative: every
-   faction's next lock lands exactly in column N, overwriting whatever the
-   cell holds (a wrong turn count must never derail the sheet). From the
-   following round on, the normal first-empty-column rule resumes. Any cell
-   can also be edited directly in EDIT; hand edits are stored separately
-   and win over the locked value in display and export.
+   "we are in round N": the highlight moves there and every lock lands in
+   that column until the round advances (a wrong turn count must never
+   derail the sheet — fix the highlight, the numbers follow). Any cell can
+   also be edited directly in EDIT; hand edits are stored separately and
+   win over the locked value in display and export.
 10. **+ / −** move the faction's *actual marker* along the track (fast
     glide, small hop), so the board itself stays the single source of truth;
     clicks accumulate. Placement keeps every marker visible: an empty cell
