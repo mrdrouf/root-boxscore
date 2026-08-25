@@ -1941,12 +1941,12 @@ function rebuildUI()
         and variantOptions(fac) or nil
       if opts then extra = extra + math.ceil(#opts / 6) end
     end
-    local baseH = 128
+    local baseH = 118
     local topY = math.max(8, math.floor((H - baseH) / 2))
     add('<Panel width="' .. (W - 80) .. '" height="' .. (baseH + extra * 30)
       .. '" rectAlignment="UpperCenter" offsetXY="0 -' .. topY .. '"'
       .. ' color="' .. WALNUT .. '">')
-    add('<VerticalLayout padding="10 10 10 10" spacing="6">')
+    add('<VerticalLayout padding="10 10 10 10" spacing="6" childForceExpandHeight="false">')
     for half = 1, 2 do
       add('<HorizontalLayout preferredHeight="46" spacing="5">')
       local from = (half - 1) * 7 + 1
@@ -2054,7 +2054,7 @@ function rebuildUI()
         chosen[w:match("^%s*(.-)%s*$")] = true
       end
       add('<Panel width="' .. (W - 140) .. '" height="118" color="' .. WALNUT .. '">')
-      add('<VerticalLayout padding="10 10 10 10" spacing="6">')
+      add('<VerticalLayout padding="10 10 10 10" spacing="6" childForceExpandHeight="false">')
       add('<Text fontSize="14" fontStyle="Bold" color="' .. PARCH .. '" preferredHeight="18"' .. NOClick .. '>'
         .. esc(row.fac) .. ' &#8211; pick the character(s)</Text>')
       for half = 1, 2 do
@@ -2074,13 +2074,13 @@ function rebuildUI()
   elseif S.setup and S.experimental and S.overlay == "craft" then
     -- pinned by the top edge like the picker: opening the round or add row
     -- grows the panel downward without shifting what is already there
-    local baseH = 74 + #S.rows * 32
+    local baseH = 64 + #S.rows * 32
     local hh = baseH + ((S.craftAdd or S.craftPick) and 30 or 0)
     local topY = math.max(8, math.floor((H - baseH) / 2))
     add('<Panel width="' .. (W - 120) .. '" height="' .. hh
       .. '" rectAlignment="UpperCenter" offsetXY="0 -' .. topY .. '"'
       .. ' color="' .. WALNUT .. '">')
-    add('<VerticalLayout padding="10 10 8 8" spacing="4">')
+    add('<VerticalLayout padding="10 10 8 8" spacing="4" childForceExpandHeight="false">')
     add('<Text fontSize="12" fontStyle="Bold" color="' .. PARCH .. '" preferredHeight="16"'
       .. ' alignment="MiddleLeft"' .. NOClick
       .. '>CRAFTED ITEMS &#8211; click T# to set the round, &#215; removes, + adds</Text>')
