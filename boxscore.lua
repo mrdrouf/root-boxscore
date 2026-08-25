@@ -1929,11 +1929,23 @@ function rebuildUI()
   -- overlays float over the rows, so the sheet never changes size
   local PICK_DARK = 'colors="#57402A|' .. RUST .. '|' .. GOLD .. '|#00000000"'
   if S.setup and S.overlay == "picker" then
-    local extraRows = 0
+    -- character chips flow in rows of six so long names never wrap; the
+    -- panel is pinned by its TOP edge, so selecting a faction only grows
+    -- it downward - nothing shifts or recenters
+    -- the Eyrie is excluded: its leader is chosen in play, never in the
+    -- draft, so an unpicked Eyrie has no leader options to note (captains
+    -- and vagabond characters ARE distinct unpicked cards)
+    local extra = 0
     for _, fac in ipairs(ROSTER) do
-      if S.unpicked[fac] == true and variantOptions(fac) then extraRows = extraRows + 1 end
+      local opts = (S.unpicked[fac] == true and fac ~= "Eyrie")
+        and variantOptions(fac) or nil
+      if opts then extra = extra + math.ceil(#opts / 6) end
     end
-    add('<Panel width="' .. (W - 100) .. '" height="' .. (128 + extraRows * 34) .. '" color="' .. WALNUT .. '">')
+    local baseH = 128
+    local topY = math.max(8, math.floor((H - baseH) / 2))
+    add('<Panel width="' .. (W - 80) .. '" height="' .. (baseH + extra * 30)
+      .. '" rectAlignment="UpperCenter" offsetXY="0 -' .. topY .. '"'
+      .. ' color="' .. WALNUT .. '">')
     add('<VerticalLayout padding="10 10 10 10" spacing="6">')
     for half = 1, 2 do
       add('<HorizontalLayout preferredHeight="46" spacing="5">')
@@ -1951,20 +1963,23 @@ function rebuildUI()
     end
     for fi, fac in ipairs(ROSTER) do
       local opts = variantOptions(fac)
-      if S.unpicked[fac] == true and opts then
-        add('<HorizontalLayout preferredHeight="30" spacing="4">')
-        add('<Text fontSize="12" fontStyle="Bold" color="' .. PARCH .. '" preferredWidth="64"'
-          .. ' alignment="MiddleRight"' .. NOClick .. '>' .. esc(fac) .. ':</Text>')
+      if S.unpicked[fac] == true and fac ~= "Eyrie" and opts then
         local chosen = {}
         for w in (S.unpickedVar[fac] or ""):gmatch("[^,]+") do
           chosen[w:match("^%s*(.-)%s*$")] = true
         end
-        for ci2, ch in ipairs(opts) do
-          chip("uv_" .. fi .. "_" .. ci2, "uiRowBtn",
-            chosen[ch] and BTN_GOLD or PICK_DARK, 0, 9,
-            chosen[ch] and INKTXT or PARCH, esc(ch))
+        for from = 1, #opts, 6 do
+          add('<HorizontalLayout preferredHeight="24" spacing="4">')
+          add('<Text fontSize="12" fontStyle="Bold" color="' .. PARCH .. '" preferredWidth="64"'
+            .. ' alignment="MiddleRight"' .. NOClick .. '>'
+            .. (from == 1 and (esc(fac) .. ':') or ' ') .. '</Text>')
+          for ci2 = from, math.min(from + 5, #opts) do
+            chip("uv_" .. fi .. "_" .. ci2, "uiRowBtn",
+              chosen[opts[ci2]] and BTN_GOLD or PICK_DARK, 0, 10,
+              chosen[opts[ci2]] and INKTXT or PARCH, esc(opts[ci2]))
+          end
+          add('</HorizontalLayout>')
         end
-        add('</HorizontalLayout>')
       end
     end
     add('</VerticalLayout></Panel>')
@@ -2057,8 +2072,14 @@ function rebuildUI()
       add('</VerticalLayout></Panel>')
     end
   elseif S.setup and S.experimental and S.overlay == "craft" then
-    local hh = 74 + #S.rows * 32 + ((S.craftAdd or S.craftPick) and 30 or 0)
-    add('<Panel width="' .. (W - 120) .. '" height="' .. hh .. '" color="' .. WALNUT .. '">')
+    -- pinned by the top edge like the picker: opening the round or add row
+    -- grows the panel downward without shifting what is already there
+    local baseH = 74 + #S.rows * 32
+    local hh = baseH + ((S.craftAdd or S.craftPick) and 30 or 0)
+    local topY = math.max(8, math.floor((H - baseH) / 2))
+    add('<Panel width="' .. (W - 120) .. '" height="' .. hh
+      .. '" rectAlignment="UpperCenter" offsetXY="0 -' .. topY .. '"'
+      .. ' color="' .. WALNUT .. '">')
     add('<VerticalLayout padding="10 10 8 8" spacing="4">')
     add('<Text fontSize="12" fontStyle="Bold" color="' .. PARCH .. '" preferredHeight="16"'
       .. ' alignment="MiddleLeft"' .. NOClick
