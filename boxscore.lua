@@ -129,7 +129,11 @@ local UI_POSES = {
   { pos = "0 0 -60", rot = "180 180 0" },
   { pos = "0 0 -60", rot = "180 180 180" },
 }
-local SIZE_MULS = { 0.55, 0.7, 0.85, 1.05, 1.3, 1.6 }
+-- 100% preserves the sheet's historical default footprint (the old size index
+-- used 0.7).  The legacy values remain only to migrate existing saved sheets.
+local LEGACY_SIZE_MULS = { 0.55, 0.7, 0.85, 1.05, 1.3, 1.6 }
+local LEGACY_BASE_MUL = 0.7
+local SIZE_MIN_PCT, SIZE_MAX_PCT = 50, 200
 
 ----------------------------------------------------------------------- state --
 local S = {
@@ -144,7 +148,7 @@ local S = {
   setup     = false,
   pose      = 1,
   scaleMode = 1,
-  sizeIdx   = 2,
+  sizePct   = 100,
   meta      = { map = "", deck = "", hook = "", thread = "", game = "" },
   unpicked  = {},   -- fac -> true (picked by hand from the roster)
   unpickedVar = {}, -- fac -> "cap1, cap2" (captains available in the draft)
@@ -161,6 +165,18 @@ local pollCount = 0
 
 ------------------------------------------------------------------- utilities --
 local function now() return os.time() end
+
+local function clampSizePct(value)
+  return math.max(SIZE_MIN_PCT, math.min(SIZE_MAX_PCT,
+    math.floor((tonumber(value) or 100) + 0.5)))
+end
+
+-- RTT destroys and recreates the sheet when its map/ranked/tool buttons spawn
+-- one.  The saved S.sizePct handles normal reloads; this Global is only the
+-- in-session hand-off between the old object and its freshly spawned copy.
+local function rememberSizePct()
+  pcall(function() Global.setVar("RTT_BOXSCORE_SIZE_PCT", S.sizePct) end)
+end
 
 local function logev(ev, fac, a, b)
   table.insert(S.log, { t = now(), ev = ev, fac = fac, a = a, b = b })
@@ -1563,10 +1579,14 @@ function uiScaleMode()
   rebuildUI()
 end
 
-function uiSize()
-  S.sizeIdx = (S.sizeIdx % #SIZE_MULS) + 1
+local function changeSizePct(delta)
+  S.sizePct = clampSizePct((S.sizePct or 100) + delta)
+  rememberSizePct()
   rebuildUI()
 end
+
+function uiSizeDown() changeSizePct(-10) end
+function uiSizeUp() changeSizePct(10) end
 
 function uiHide()
   S.hidden = not S.hidden
@@ -1880,16 +1900,17 @@ function rebuildUI()
   local W = 54 + iconW + facW + domW + nameW + (showR - 1) * cellW + liveW + btnW
   local rowH, headH = 40, 26
   local H = 56 + headH + math.max(1, #S.rows) * (rowH + 3) + 42
-  local mul = SIZE_MULS[S.sizeIdx]
+  local mul = clampSizePct(S.sizePct) / 100
 
   -- The walnut cardboard extends FRAME px beyond the sheet on every side.
   -- That rim is bare object surface - outside the UI canvas entirely - so it
   -- is grabbable by construction, no matter how the UI treats clicks. The
   -- parchment area additionally lets clicks through via raycastTarget.
   local FRAME = 5
-  local k = BASE_SCALE * mul / PX_PER_UNIT
+  local k = BASE_SCALE * LEGACY_BASE_MUL / PX_PER_UNIT
   local ww = (W + 2 * FRAME) * k
   local wh = (H + 2 * FRAME) * k
+  ww, wh = ww * mul, wh * mul
   local key = string.format("%.2f|%.2f", ww, wh)
   if key ~= lastScaleKey and self.held_by_color == nil then
     lastScaleKey = key
@@ -1899,7 +1920,7 @@ function rebuildUI()
   if S.scaleMode == 1 then
     sx, sy = PX_PER_UNIT / (W + 2 * FRAME), PX_PER_UNIT / (H + 2 * FRAME)
   else
-    sx, sy = BASE_SCALE * mul, BASE_SCALE * mul
+    sx, sy = BASE_SCALE * LEGACY_BASE_MUL * mul, BASE_SCALE * LEGACY_BASE_MUL * mul
   end
   local pose = UI_POSES[S.pose]
 
@@ -1955,6 +1976,10 @@ function rebuildUI()
       chip("cebtn", "uiCraftMenu", (S.overlay == "craft") and BTN_GOLD or BTN_DARK, 58, 10,
         (S.overlay == "craft") and INKTXT or PARCH, "ITEMS")
     end
+    add('<Text fontSize="10" fontStyle="Bold" color="' .. RUST .. '" alignment="MiddleRight"'
+      .. ' preferredWidth="62"' .. NOClick .. '>SIZE ' .. clampSizePct(S.sizePct) .. '%</Text>')
+    chip("szdn", "uiSizeDown", BTN_DARK, 26, 13, PARCH, "&#8722;")
+    chip("szup", "uiSizeUp", BTN_DARK, 26, 13, PARCH, "+")
     chip("rsbtn", "uiReset", BTN_DARK, 56, 10, PARCH, "RESET")
   else
     add('<Text fontSize="18" fontStyle="Bold" color="' .. INKTXT .. '" alignment="MiddleLeft"'
@@ -2383,9 +2408,10 @@ function onSave()
 end
 
 function onLoad(saved)
+  local loadedState = false
   if saved ~= nil and saved ~= "" then
     local ok, d = pcall(function() return JSON.decode(saved) end)
-    if ok and d ~= nil and d.rows ~= nil then S = d end
+    if ok and d ~= nil and d.rows ~= nil then S = d; loadedState = true end
   end
   S.meta = S.meta or { map = "", deck = "", hook = "", thread = "" }
   S.meta.deck = S.meta.deck or ""
@@ -2436,7 +2462,22 @@ function onLoad(saved)
   end
   S.cols = S.cols or 10
   S.scaleMode = S.scaleMode or 1
-  S.sizeIdx = S.sizeIdx or 2
+  if S.sizePct == nil then
+    local oldIdx = math.floor(tonumber(S.sizeIdx) or 2)
+    local oldMul = LEGACY_SIZE_MULS[oldIdx] or LEGACY_BASE_MUL
+    S.sizePct = math.floor(oldMul / LEGACY_BASE_MUL * 10 + 0.5) * 10
+  end
+  -- A brand-new RTT spawn has no LuaScriptState, so recover the percentage
+  -- remembered by the prior copy.  A real saved state always wins.
+  if not loadedState then
+    local ok, remembered = pcall(function()
+      return Global.getVar("RTT_BOXSCORE_SIZE_PCT")
+    end)
+    if ok and tonumber(remembered) ~= nil then S.sizePct = tonumber(remembered) end
+  end
+  S.sizePct = clampSizePct(S.sizePct)
+  S.sizeIdx = nil
+  rememberSizePct()
   S.setup = S.setup or false
   S.overlay = nil
   S.lastExport = S.lastExport or ""
@@ -2447,7 +2488,8 @@ function onLoad(saved)
   self.addContextMenuItem("export", uiExport, false)
   self.addContextMenuItem("flip track", uiFlip, false)
   self.addContextMenuItem("spin panel", uiSpin, false)
-  self.addContextMenuItem("panel size", uiSize, false)
+  self.addContextMenuItem("size +10%", uiSizeUp, false)
+  self.addContextMenuItem("size -10%", uiSizeDown, false)
   self.addContextMenuItem("panel scale mode", uiScaleMode, false)
   self.addContextMenuItem("diagnose", uiDiag, false)
 
