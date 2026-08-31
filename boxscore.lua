@@ -7,13 +7,13 @@
 -- in the map's LOCAL coordinates - any map, anywhere, any rotation. A marker's
 -- score is the nearest track column to positionToLocal(marker position).
 --
--- Turn integration: row order follows physical hand/seat positions, the active
--- faction follows Turns.turn_color, and every turn pass
--- locks the score of the faction whose turn just ended. Seats are matched to
--- factions by hand zone <-> "<Faction> Supply" distance (the supply bag sits
--- with the faction board in front of its player), which also fills in player
--- names. Without the turn system, rows order themselves clockwise by seat and
--- END TURN cycles them manually.
+-- Turn integration: row order follows physical hand-zone/seat positions, the
+-- active faction follows Turns.turn_color, and every turn pass locks the score
+-- of the faction whose turn just ended. Seats are matched to factions by every
+-- color's hand zone <-> "<Faction> Supply" distance (the supply bag sits with
+-- the faction board in front of its player), independent of whether that color
+-- currently has a live player. Live players supply display names only. Without
+-- the turn system, END TURN cycles the rows manually.
 --
 -- The object IS the sheet: the walnut slab resizes itself to exactly match
 -- the rendered scoresheet (TTS object UI renders at 250 px per world unit),
@@ -602,24 +602,71 @@ local function seatedHands()
   return hands
 end
 
--- Seat -> faction: nearest hand zone to the faction's supply bag (the supply
--- sits with the faction board in front of its player), greedily one-to-one.
-local function refreshSeats(byName)
-  local hands = seatedHands()
-  if #hands == 0 then return false end
-  local cand = {}
-  for _, row in ipairs(S.rows) do
-    local bag = facAnchor(row.fac, byName)
-    if bag then
-      local bp = bag.getPosition()
-      for _, h in ipairs(hands) do
-        local dx, dz = h.pos.x - bp.x, h.pos.z - bp.z
-        table.insert(cand, { d = dx * dx + dz * dz, fac = row.fac,
-                             color = h.color, name = h.name })
+-- TTS's ten playable colors are stable even when nobody occupies them. Query
+-- each color directly: getHandTransform returns its hand-zone geometry without
+-- requiring a live Player entry. Some tables omit colors/hand zones, so every
+-- lookup is guarded. If this API yields nothing at all, retain the old live-seat
+-- behavior as a safe fallback.
+local PLAYER_COLORS = {
+  "White", "Brown", "Red", "Orange", "Yellow",
+  "Green", "Teal", "Blue", "Purple", "Pink",
+}
+
+local function seatPositions()
+  local positions, count = {}, 0
+  for _, color in ipairs(PLAYER_COLORS) do
+    local ok, ht = pcall(function() return Player[color].getHandTransform() end)
+    local pos = ok and ht and ht.position or nil
+    if pos ~= nil and pos.x ~= nil and pos.z ~= nil then
+      positions[color] = pos
+      count = count + 1
+    end
+  end
+  if count == 0 then
+    for _, h in ipairs(seatedHands()) do
+      if h.pos ~= nil and h.pos.x ~= nil and h.pos.z ~= nil then
+        positions[h.color] = h.pos
+        count = count + 1
       end
     end
   end
-  table.sort(cand, function(x, y) return x.d < y.d end)
+  return positions, count
+end
+
+-- Color -> faction: the faction's supply/board game piece remains in its player
+-- area after the VP marker moves to the score track. Match that physical anchor
+-- to the nearest color hand zone, greedily one-to-one. Live occupancy is used
+-- only to attach a Steam name; it never controls the row's color/seat.
+local function refreshSeats(byName)
+  local positions, seatCount = seatPositions()
+  if seatCount == 0 then return false end
+  local liveNames = {}
+  for _, p in ipairs(Player.getPlayers()) do
+    if p.seated and p.color ~= "Black" and p.color ~= "Grey" then
+      liveNames[p.color] = p.steam_name
+    end
+  end
+  local cand, anchored = {}, {}
+  for _, row in ipairs(S.rows) do
+    local bag = facAnchor(row.fac, byName)
+    if bag then
+      anchored[row.fac] = true
+      local bp = bag.getPosition()
+      for ci, color in ipairs(PLAYER_COLORS) do
+        local pos = positions[color]
+        if pos ~= nil then
+          local dx, dz = pos.x - bp.x, pos.z - bp.z
+          table.insert(cand, { d = dx * dx + dz * dz, fac = row.fac,
+                               color = color, ci = ci })
+        end
+      end
+    end
+  end
+  table.sort(cand, function(x, y)
+    if math.abs(x.d - y.d) > 0.000001 then return x.d < y.d end
+    if x.fac ~= y.fac then return x.fac < y.fac end
+    return x.ci < y.ci
+  end)
   local usedC, usedF, assigned, changed = {}, {}, {}, false
   for _, c in ipairs(cand) do
     if not usedC[c.color] and not usedF[c.fac] then
@@ -627,17 +674,19 @@ local function refreshSeats(byName)
       assigned[c.fac] = c
     end
   end
-  -- Clear stale colors as seats empty or anchors appear. This prevents an old
-  -- assignment from competing with a newly seated row during partial setup.
+  -- Clear a stale color only when this pass actually found the row's anchor but
+  -- could not assign it. If an anchor is temporarily absent, keep the last
+  -- known color instead of throwing away a valid physical-seat match.
   for _, row in ipairs(S.rows) do
     local c = assigned[row.fac]
     if c then
       if row.color ~= c.color then row.color = c.color; changed = true end
-      if row.player == "" or row.nameAuto then
-        if row.player ~= c.name then row.player = c.name; changed = true end
+      local name = liveNames[c.color]
+      if name ~= nil and (row.player == "" or row.nameAuto) then
+        if row.player ~= name then row.player = name; changed = true end
         row.nameAuto = true
       end
-    elseif row.color ~= nil then
+    elseif anchored[row.fac] and row.color ~= nil then
       row.color = nil
       changed = true
     end
@@ -676,13 +725,13 @@ local function fullTurnCoverage()
 end
 
 -- Row order is always physical seat order, even while RTT's TTS turn system is
--- running: RTT assembles Turns.order in draft/roster order. Seated rows sort
--- clockwise by hand position; rows not matched to a current seat stay last.
--- Original indices break ties, making every partial-seating pass stable.
+-- running: RTT assembles Turns.order in draft/roster order. Matched rows sort
+-- clockwise by their color's hand-zone position whether occupied or empty;
+-- rows with no usable seat stay last. Original indices make every pass stable.
 local function seatOrder()
   if S.manualOrder then return false end
-  local hands = {}
-  for _, h in ipairs(seatedHands()) do hands[h.color] = h.pos end
+  local hands, seatCount = seatPositions()
+  if seatCount == 0 then return false end
   local before, original = {}, {}
   for i, r in ipairs(S.rows) do before[i], original[r] = r, i end
   resort(function(x, y)
