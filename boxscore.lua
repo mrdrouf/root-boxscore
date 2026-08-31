@@ -7,8 +7,8 @@
 -- in the map's LOCAL coordinates - any map, anywhere, any rotation. A marker's
 -- score is the nearest track column to positionToLocal(marker position).
 --
--- Turn integration: with the TTS turn system running, row order mirrors the
--- turn order, the active faction follows Turns.turn_color, and every turn pass
+-- Turn integration: row order follows physical hand/seat positions, the active
+-- faction follows Turns.turn_color, and every turn pass
 -- locks the score of the faction whose turn just ended. Seats are matched to
 -- factions by hand zone <-> "<Faction> Supply" distance (the supply bag sits
 -- with the faction board in front of its player), which also fills in player
@@ -55,6 +55,11 @@ local INKTXT  = "#26170B"
 local RUST    = "#7E4A1E"
 
 local DECKS = { "Base Deck", "Exiles and Partisans", "Squires and Disciples" }
+
+-- Every standard dominance card in the mod is a Card named "Dominance" whose
+-- description is its suit. Frog dominance cards also exist, but Root's normal
+-- VP-marker dominance play uses only these four suits.
+local DOM_SUITS = { fox = true, mouse = true, rabbit = true, bird = true }
 
 -- the group's map pool, offered as one-click chips in setup
 local MAPS = { "Summer", "Winter", "Lake", "Mountain", "Marsh", "Gorge" }
@@ -129,7 +134,7 @@ local SIZE_MULS = { 0.55, 0.7, 0.85, 1.05, 1.3, 1.6 }
 ----------------------------------------------------------------------- state --
 local S = {
   rows      = {},   -- { fac, player, nameAuto, color, tintHex, iconUrl, guid,
-                    --   score, locks={}, edits={} }
+                    --   score, locks={}, edits={}, dom={turn,round,suit,score,won} }
   active    = 1,
   turns     = 0,
   cols      = 10,   -- round columns always shown: fixed size during the game,
@@ -195,6 +200,12 @@ end
 
 local function turnsRunning()
   return Turns.enable and Turns.order ~= nil and #Turns.order > 0
+end
+
+-- TTS exposes the active color but no monotonic turn number. S.turns is the
+-- persisted count of completed turns, so the turn in progress is the next one.
+local function currentTurnNumber()
+  return math.max(1, math.floor(tonumber(S.turns) or 0) + 1)
 end
 
 local function assetName(fac)
@@ -357,6 +368,56 @@ local function findMarker(row)
   end
   if loose ~= nil then row.guid = loose.getGUID() end
   return loose
+end
+
+local function dominanceCardSuit(o)
+  if o == nil or (o.type ~= "Card" and o.tag ~= "Card") then return nil end
+  local okn, name = pcall(function() return o.getName() end)
+  if not okn or tostring(name or ""):lower() ~= "dominance" then return nil end
+  local okd, desc = pcall(function() return o.getDescription() end)
+  if not okd then return nil end
+  local suit = tostring(desc or ""):match("^%s*(.-)%s*$"):lower()
+  return DOM_SUITS[suit] and suit or nil
+end
+
+-- Dominance is declared by physically putting the VP marker on the card. Use
+-- the card's live bounds (rather than CardIDs, which differ among deck copies)
+-- and require both objects to have settled before accepting the placement.
+local function markerSitsOnCard(marker, card)
+  if marker == nil or card == nil or marker.held_by_color ~= nil
+    or card.held_by_color ~= nil then return false end
+  local okm, moving = pcall(function() return marker.isSmoothMoving() end)
+  if okm and moving then return false end
+  local okc, cardMoving = pcall(function() return card.isSmoothMoving() end)
+  if okc and cardMoving then return false end
+  local okb, b = pcall(function() return card.getBounds() end)
+  if not okb or b == nil or b.center == nil or b.size == nil then return false end
+  local mp = marker.getPosition()
+  local cx, cy, cz = b.center.x or b.center[1], b.center.y or b.center[2],
+    b.center.z or b.center[3]
+  local sx, sy, sz = b.size.x or b.size[1], b.size.y or b.size[2],
+    b.size.z or b.size[3]
+  if not cx or not cy or not cz or not sx or not sy or not sz then return false end
+  local dy = mp.y - cy
+  return math.abs(mp.x - cx) <= sx * 0.5 + 0.2
+    and math.abs(mp.z - cz) <= sz * 0.5 + 0.2
+    and dy >= -0.25 and dy <= math.max(3.0, sy + 2.0)
+end
+
+local function dominanceAt(marker, cards)
+  for _, c in ipairs(cards) do
+    if markerSitsOnCard(marker, c.obj) then return c.suit end
+  end
+  return nil
+end
+
+local function registerDominance(row, suit)
+  if row == nil or row.dom ~= nil or not DOM_SUITS[suit] then return false end
+  row.dom = { turn = currentTurnNumber(),
+    round = math.max(1, math.floor(S.turns / math.max(1, #S.rows)) + 1),
+    suit = suit, score = row.score, won = false }
+  logev("dominance", row.fac, row.dom.turn, suit)
+  return true
 end
 
 -- Track orientation is NOT inferred: on every map in this mod the printed 0
@@ -541,16 +602,26 @@ local function refreshSeats(byName)
     end
   end
   table.sort(cand, function(x, y) return x.d < y.d end)
-  local usedC, usedF, changed = {}, {}, false
+  local usedC, usedF, assigned, changed = {}, {}, {}, false
   for _, c in ipairs(cand) do
     if not usedC[c.color] and not usedF[c.fac] then
       usedC[c.color], usedF[c.fac] = true, true
-      local row = S.rows[rowByFac(c.fac)]
+      assigned[c.fac] = c
+    end
+  end
+  -- Clear stale colors as seats empty or anchors appear. This prevents an old
+  -- assignment from competing with a newly seated row during partial setup.
+  for _, row in ipairs(S.rows) do
+    local c = assigned[row.fac]
+    if c then
       if row.color ~= c.color then row.color = c.color; changed = true end
       if row.player == "" or row.nameAuto then
         if row.player ~= c.name then row.player = c.name; changed = true end
         row.nameAuto = true
       end
+    elseif row.color ~= nil then
+      row.color = nil
+      changed = true
     end
   end
   return changed
@@ -586,51 +657,44 @@ local function fullTurnCoverage()
   return true
 end
 
+-- Row order is always physical seat order, even while RTT's TTS turn system is
+-- running: RTT assembles Turns.order in draft/roster order. Seated rows sort
+-- clockwise by hand position; rows not matched to a current seat stay last.
+-- Original indices break ties, making every partial-seating pass stable.
+local function seatOrder()
+  if S.manualOrder then return false end
+  local hands = {}
+  for _, h in ipairs(seatedHands()) do hands[h.color] = h.pos end
+  local before, original = {}, {}
+  for i, r in ipairs(S.rows) do before[i], original[r] = r, i end
+  resort(function(x, y)
+    local px, py = x.color and hands[x.color], y.color and hands[y.color]
+    if px == nil or py == nil then
+      if px ~= nil then return true end
+      if py ~= nil then return false end
+      return original[x] < original[y]
+    end
+    local ax, ay = math.atan2(px.z, px.x), math.atan2(py.z, py.x)
+    if math.abs(ax - ay) > 0.000001 then return ax > ay end
+    return original[x] < original[y]
+  end)
+  for i, r in ipairs(S.rows) do
+    if before[i] ~= r then return true end
+  end
+  return false
+end
+
+-- Turns controls only the live pointer and automatic locks. It deliberately
+-- does not control row order; physical seat geometry above is authoritative.
 local function followTurns()
   if not fullTurnCoverage() then return false end
   local changed = false
-  if not S.manualOrder then
-    local pos = {}
-    for i, c in ipairs(Turns.order) do pos[c] = i end
-    local before = {}
-    for i, r in ipairs(S.rows) do before[i] = r end
-    resort(function(x, y)
-      local kx = (x.color and pos[x.color]) or 999
-      local ky = (y.color and pos[y.color]) or 999
-      return kx < ky
-    end)
-    for i, r in ipairs(S.rows) do
-      if before[i] ~= r then changed = true end
-    end
-  end
   local tc = Turns.turn_color
   if tc and tc ~= "" then
     local i = rowByColor(tc)
     if i and i ~= S.active then S.active = i; changed = true end
   end
   return changed
-end
-
--- Without the turn system and before anything is locked, order rows clockwise
--- around the table by seat position - Root's usual turn order convention.
-local function seatOrder()
-  if S.manualOrder or turnsRunning() or S.turns > 0 then return false end
-  for _, row in ipairs(S.rows) do
-    if #row.locks > 0 then return false end
-  end
-  local hands = {}
-  for _, h in ipairs(seatedHands()) do hands[h.color] = h.pos end
-  local before = {}
-  for i, r in ipairs(S.rows) do before[i] = r end
-  resort(function(x, y)
-    local px, py = x.color and hands[x.color], y.color and hands[y.color]
-    if px == nil or py == nil then return (px ~= nil) and py == nil end
-    return math.atan2(px.z, px.x) > math.atan2(py.z, py.x)
-  end)
-  for i, r in ipairs(S.rows) do
-    if before[i] ~= r then return true end
-  end
-  return false
 end
 
 --------------------------------------------------------------------- export --
@@ -652,7 +716,8 @@ local function exportPayload(kind, extra)
   for _, row in ipairs(S.rows) do
     table.insert(p.rows, { faction = row.fac, player = row.player,
       variant = row.variant, color = row.color, score = row.score,
-      locks = row.locks, edits = row.edits, crafts = row.crafts })
+      locks = row.locks, edits = row.edits, crafts = row.crafts,
+      dominance = row.dom })
   end
   if extra ~= nil then
     for k, v in pairs(extra) do p[k] = v end
@@ -962,6 +1027,7 @@ local function poll()
   end
   if TRACK == nil then return end
 
+  local domCards = {}
   for _, o in ipairs(getAllObjects()) do
     local n = o.getName() or ""
     local fac = n:match("^(.+) VP$")
@@ -970,11 +1036,19 @@ local function poll()
       refreshAssets()
       dirty = true
     end
+    local suit = dominanceCardSuit(o)
+    if suit then table.insert(domCards, { obj = o, suit = suit }) end
   end
 
   for ri, row in ipairs(S.rows) do
     local m = findMarker(row)
-    local idx = m and readCell(m) or nil
+    if row.dom == nil and m ~= nil then
+      local suit = dominanceAt(m, domCards)
+      if suit and registerDominance(row, suit) then dirty = true end
+    end
+    -- Once dominance is registered, the last track score is immutable. The
+    -- marker may later move anywhere and no score read can change this row.
+    local idx = (row.dom == nil and m) and readCell(m) or nil
     if idx ~= nil then
       local sc = cellToScore(idx)
       if sc ~= row.score then
@@ -995,9 +1069,10 @@ local function poll()
         while #row.locks < r - 1 do table.insert(row.locks, -1) end
         row.locks[r] = sc
         S.winner = row.fac
+        S.winnerReason = "score"
         logev("gameover", row.fac, r, sc)
         dirty = true
-      elseif S.winner == row.fac and sc < 30 then
+      elseif S.winner == row.fac and S.winnerLock ~= nil and sc < 30 then
         local wl = S.winnerLock
         if wl ~= nil and wl.fac == row.fac then
           if wl.prevLock ~= nil then
@@ -1012,6 +1087,7 @@ local function poll()
           if wl.prevEdit ~= nil then row.edits[tostring(wl.r)] = wl.prevEdit end
         end
         S.winner = nil
+        S.winnerReason = nil
         S.winnerLock = nil
         logev("resume", row.fac)
         dirty = true
@@ -1124,6 +1200,7 @@ local function poll()
       if bag then SUPPLYPOS[row.fac] = bag.getPosition() end
     end
     if refreshSeats(byName) then dirty = true end
+    if seatOrder() then dirty = true end
     if refreshDeck() then dirty = true end
     if refreshVariants(byName) then dirty = true end
     if followTurns() then dirty = true end
@@ -1143,13 +1220,25 @@ function lockRow(i)
   if S.winner ~= nil then return end
   -- re-read the marker right now: the polled score can be a beat stale, and a
   -- lock is forever (it is what gets exported)
-  local m = findMarker(row)
-  local idx = m and readCell(m) or nil
-  if idx ~= nil then
-    local sc = cellToScore(idx)
-    if sc ~= row.score then
-      logev("score", row.fac, row.score, sc)
-      row.score = sc
+  if row.dom == nil then
+    local m = findMarker(row)
+    -- A quick turn pass can beat the 1.2-second poll. Check for dominance here
+    -- too, before S.turns increments, so the recorded turn cannot slip by one.
+    local domCards = {}
+    for _, o in ipairs(getAllObjects()) do
+      local suit = dominanceCardSuit(o)
+      if suit then table.insert(domCards, { obj = o, suit = suit }) end
+    end
+    local suit = m and dominanceAt(m, domCards) or nil
+    if not (suit and registerDominance(row, suit)) then
+      local idx = m and readCell(m) or nil
+      if idx ~= nil then
+        local sc = cellToScore(idx)
+        if sc ~= row.score then
+          logev("score", row.fac, row.score, sc)
+          row.score = sc
+        end
+      end
     end
   end
   -- The HIGHLIGHTED round column is the single truth for where a lock
@@ -1216,7 +1305,7 @@ end
 
 local function nudge(i, delta)
   local row = S.rows[i]
-  if row == nil or TRACK == nil then return end
+  if row == nil or row.dom ~= nil or TRACK == nil then return end
   local m = findMarker(row)
   if m == nil then dbg("BoxScore: cannot find " .. row.fac .. " VP") return end
   if m.held_by_color ~= nil then return end
@@ -1309,6 +1398,7 @@ function uiReset()
   S.active = 1
   S.turns = 0
   S.winner = nil
+  S.winnerReason = nil
   S.winnerLock = nil
   S.undo = {}
   S.log = {}
@@ -1380,7 +1470,9 @@ end
 
 function uiFlip()
   S.flip = not S.flip
-  for _, row in ipairs(S.rows) do row.score = -1 end
+  for _, row in ipairs(S.rows) do
+    if row.dom == nil then row.score = -1 end
+  end
   rebuildUI()
 end
 
@@ -1466,6 +1558,28 @@ function uiRowBtn(player, _, id)
   elseif kind == "act" then
     if S.rows[i] then
       S.active = i
+      rebuildUI()
+    end
+  elseif kind == "domwin" then
+    local row = S.rows[i]
+    if row and row.dom then
+      local won = row.dom.won == true
+      for _, other in ipairs(S.rows) do
+        if other.dom then other.dom.won = false end
+      end
+      if won then
+        if S.winner == row.fac and S.winnerReason == "dominance" then
+          S.winner = nil
+          S.winnerReason = nil
+        end
+        logev("domwin-undo", row.fac, row.dom.turn, row.dom.suit)
+      else
+        row.dom.won = true
+        S.winner = row.fac
+        S.winnerReason = "dominance"
+        S.winnerLock = nil
+        logev("domwin", row.fac, row.dom.turn, row.dom.suit)
+      end
       rebuildUI()
     end
   elseif kind == "fv" then
@@ -1641,6 +1755,11 @@ function boxText()
     if row.variant ~= nil and row.variant ~= "" then
       table.insert(lines, "  > " .. row.variant)
     end
+    if row.dom ~= nil then
+      table.insert(lines, "  > dominance: turn " .. tostring(row.dom.turn)
+        .. ", " .. tostring(row.dom.suit)
+        .. ", won: " .. ((row.dom.won == true) and "yes" or "no"))
+    end
     if S.experimental and row.crafts ~= nil and #row.crafts > 0 then
       local cs = {}
       for _, c in ipairs(row.crafts) do
@@ -1675,9 +1794,9 @@ function rebuildUI()
   for _, row in ipairs(S.rows) do maxLocks = math.max(maxLocks, #row.locks) end
   local showR = math.min(math.max((S.cols or 10) + 1, maxLocks + 2), 41)
   local cellW = showR > 14 and 36 or 44
-  local iconW, facW, nameW, liveW = 30, 118, 130, 48
+  local iconW, facW, domW, nameW, liveW = 30, 118, 70, 130, 48
   local btnW = 117
-  local W = 54 + iconW + facW + nameW + (showR - 1) * cellW + liveW + btnW
+  local W = 54 + iconW + facW + domW + nameW + (showR - 1) * cellW + liveW + btnW
   local rowH, headH = 40, 26
   local H = 56 + headH + math.max(1, #S.rows) * (rowH + 3) + 42
   local mul = SIZE_MULS[S.sizeIdx]
@@ -1776,6 +1895,7 @@ function rebuildUI()
   add('<HorizontalLayout preferredHeight="' .. headH .. '" spacing="3">')
   add('<Text preferredWidth="' .. iconW .. '"' .. NOClick .. '> </Text>')
   add('<Text preferredWidth="' .. facW .. '"' .. NOClick .. '> </Text>')
+  add('<Text preferredWidth="' .. domW .. '"' .. NOClick .. '> </Text>')
   add('<Text preferredWidth="' .. nameW .. '"' .. NOClick .. '> </Text>')
   local curRound = math.floor(S.turns / math.max(1, #S.rows)) + 1
   for r = 1, showR - 1 do
@@ -1842,6 +1962,19 @@ function rebuildUI()
         .. ' alignment="UpperLeft"' .. NOClick .. '>' .. esc(row.variant) .. '</Text>')
     end
     add('</VerticalLayout>')
+    if row.dom ~= nil then
+      add('<VerticalLayout preferredWidth="' .. domW
+        .. '" spacing="1" childForceExpandHeight="false">')
+      add('<Text fontSize="9" fontStyle="Bold" color="' .. RUST
+        .. '" preferredHeight="16" alignment="MiddleCenter"' .. NOClick .. '>dom '
+        .. esc(row.dom.suit) .. ' &#183; T' .. tostring(row.dom.turn) .. '</Text>')
+      add('<Button id="domwin_' .. i .. '" fontSize="10" fontStyle="Bold" preferredHeight="18" '
+        .. ((row.dom.won == true) and BTN_GOLD or BTN_SOFT)
+        .. ' text="dom win" onClick="uiRowBtn"/>')
+      add('</VerticalLayout>')
+    else
+      add('<Text preferredWidth="' .. domW .. '"' .. NOClick .. '> </Text>')
+    end
     if S.setup then
       add('<InputField id="nm_' .. i .. '" fontSize="15" textAlignment="MiddleCenter"'
         .. ' preferredWidth="' .. nameW
@@ -1890,8 +2023,13 @@ function rebuildUI()
     add('<Panel preferredWidth="' .. liveW .. '" color="' .. GOLD .. '"' .. NOClick .. '>'
       .. '<Text fontSize="16" fontStyle="Bold" color="' .. INKTXT .. '" alignment="MiddleCenter"' .. NOClick .. '>'
       .. live .. '</Text></Panel>')
-    chip("minus_" .. i, "uiRowBtn", BTN_SOFT, 28, 14, RUST, "&#8722;")
-    chip("plus_" .. i, "uiRowBtn", BTN_SOFT, 28, 14, RUST, "+")
+    if row.dom ~= nil then
+      add('<Text preferredWidth="28"' .. NOClick .. '> </Text>')
+      add('<Text preferredWidth="28"' .. NOClick .. '> </Text>')
+    else
+      chip("minus_" .. i, "uiRowBtn", BTN_SOFT, 28, 14, RUST, "&#8722;")
+      chip("plus_" .. i, "uiRowBtn", BTN_SOFT, 28, 14, RUST, "+")
+    end
     if S.setup and i > 1 then
       chip("up_" .. i, "uiRowBtn", BTN_SOFT, 26, 11, RUST, "&#9650;")
     else
@@ -1996,7 +2134,7 @@ function rebuildUI()
       end
     end
     section("SCORES", 30,
-      "Read automatically from the VP markers on the score track. The + and &#8722; buttons move the marker itself. A marker reaching 30 records that faction's score at once &#8211; the game is over and nothing further locks; move it off 30 to undo a mistake and resume.")
+      "Read automatically from VP markers. Put one on a fox, mouse, rabbit or bird Dominance card to freeze that row; its dom tag records the turn and suit, and dom win records a dominance victory. A marker reaching 30 ends the game.")
     section("TURNS", 44,
       "Everything runs automatically once the TTS turn order is set and every faction has its seated player: each turn pass records the finishing faction by itself. Without that, END TURN records the highlighted faction. A lock always writes the highlighted round column, overwriting whatever it holds.")
     section("EDIT", 44,
@@ -2187,12 +2325,28 @@ function onLoad(saved)
   S.turns = S.turns or 0
   S.active = S.active or 1
   if S.active > math.max(1, #S.rows) then S.active = 1 end
+  local domWinner = nil
   for _, row in ipairs(S.rows) do
     row.locks = row.locks or {}
     row.edits = row.edits or {}
     row.crafts = row.crafts or nil
     row.score = row.score or -1
     row.player = row.player or ""
+    if row.dom ~= nil then
+      row.dom.turn = math.max(1, math.floor(tonumber(row.dom.turn) or 1))
+      row.dom.round = math.max(1, math.floor(tonumber(row.dom.round) or 1))
+      row.dom.suit = tostring(row.dom.suit or ""):lower()
+      row.dom.score = tonumber(row.dom.score) or row.score
+      row.dom.won = row.dom.won == true
+      if row.dom.won then domWinner = row.fac end
+    end
+  end
+  if domWinner ~= nil then
+    S.winner = domWinner
+    S.winnerReason = "dominance"
+    S.winnerLock = nil
+  elseif S.winner ~= nil and S.winnerReason == nil then
+    S.winnerReason = "score"
   end
   S.cols = S.cols or 10
   S.scaleMode = S.scaleMode or 1
