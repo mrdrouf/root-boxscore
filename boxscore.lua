@@ -726,8 +726,11 @@ local PLAYER_COLORS = {
 -- works even when no live player occupies the colour (the hand-zone geometry fails in that case,
 -- which is why the order looked like pick order in the manual boards).
 local function rttSeatPosMap()
-  local ok, m = pcall(function() return Global.getVar("RTT_SEAT_POS") end)
-  if ok and type(m) == "table" then return m end
+  local ok, raw = pcall(function() return Global.getVar("RTT_SEAT_POS") end)
+  if ok and type(raw) == "string" and raw ~= "" then
+    local ok2, m = pcall(function() return JSON.decode(raw) end)
+    if ok2 and type(m) == "table" then return m end
+  end
   return nil
 end
 
