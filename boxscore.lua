@@ -721,8 +721,26 @@ local PLAYER_COLORS = {
   "Green", "Teal", "Blue", "Purple", "Pink",
 }
 
+-- RTT (the tournament mod) publishes each faction's EXACT seat position (player colour -> {x,z})
+-- via Global "RTT_SEAT_POS" as factions are placed. Prefer it: it is the true physical seat and
+-- works even when no live player occupies the colour (the hand-zone geometry fails in that case,
+-- which is why the order looked like pick order in the manual boards).
+local function rttSeatPosMap()
+  local ok, m = pcall(function() return Global.getVar("RTT_SEAT_POS") end)
+  if ok and type(m) == "table" then return m end
+  return nil
+end
+
 local function seatPositions()
   local positions, count = {}, 0
+  local rtt = rttSeatPosMap()
+  if rtt ~= nil then
+    for color, p in pairs(rtt) do
+      local x, z = (p[1] or p.x), (p[2] or p.z)
+      if x ~= nil and z ~= nil then positions[color] = { x = x, z = z }; count = count + 1 end
+    end
+    if count > 0 then return positions, count end
+  end
   for _, color in ipairs(PLAYER_COLORS) do
     local ok, ht = pcall(function() return Player[color].getHandTransform() end)
     local pos = ok and ht and ht.position or nil
@@ -850,8 +868,10 @@ local function seatOrder()
       if py ~= nil then return false end
       return original[x] < original[y]
     end
-    local ax, ay = math.atan2(px.z, px.x), math.atan2(py.z, py.x)
-    if math.abs(ax - ay) > 0.000001 then return ax > ay end
+    -- clockwise from directly-right (+X): seat 1 (right) at top ... seat 4 (left) at bottom
+    local ax = math.atan2(-px.z, px.x); if ax < 0 then ax = ax + 2 * math.pi end
+    local ay = math.atan2(-py.z, py.x); if ay < 0 then ay = ay + 2 * math.pi end
+    if math.abs(ax - ay) > 0.000001 then return ax < ay end
     return original[x] < original[y]
   end)
   for i, r in ipairs(S.rows) do
