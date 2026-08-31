@@ -138,7 +138,8 @@ local SIZE_MIN_PCT, SIZE_MAX_PCT = 50, 200
 ----------------------------------------------------------------------- state --
 local S = {
   rows      = {},   -- { fac, player, nameAuto, color, tintHex, iconUrl, guid,
-                    --   score, locks={}, edits={}, dom={turn,round,suit,score,won} }
+                    --   score, locks={}, edits={},
+                    --   dom={turn,round,suit,score,won,kind,frozen,markerGuid} }
   active    = 1,
   turns     = 0,
   cols      = 10,   -- round columns always shown: fixed size during the game,
@@ -431,11 +432,67 @@ local function dominanceAt(marker, cards)
   return nil
 end
 
-local function registerDominance(row, suit)
+-- Count every copy of this faction's VP marker by settled location. This is
+-- deliberately independent of row.guid: Brazen Demagogue leaves the cached
+-- original on the score track and puts a copied marker on a dominance card.
+local function dominanceMarkerState(row, cards, objects)
+  local state = { domCount = 0, trackCount = 0, looseCount = 0,
+    unsettledCount = 0, suit = nil, domMarker = nil,
+    trackMarker = nil, trackIdx = nil }
+  if row == nil then return state end
+  local markerName = row.fac .. " VP"
+  for _, marker in ipairs(objects or getAllObjects()) do
+    if (marker.getName() or "") == markerName then
+      if not objectSettled(marker) then
+        state.unsettledCount = state.unsettledCount + 1
+      else
+        local suit = dominanceAt(marker, cards)
+        if suit ~= nil then
+          state.domCount = state.domCount + 1
+          if state.domMarker == nil then
+            state.domMarker, state.suit = marker, suit
+          end
+        else
+          local idx = readCell(marker)
+          if idx ~= nil then
+            state.trackCount = state.trackCount + 1
+            -- Prefer the already-cached original if more than one marker has
+            -- somehow been left on the track.
+            if state.trackMarker == nil or marker.getGUID() == row.guid then
+              state.trackMarker, state.trackIdx = marker, idx
+            end
+          else
+            state.looseCount = state.looseCount + 1
+          end
+        end
+      end
+    end
+  end
+  if state.trackMarker ~= nil then row.guid = state.trackMarker.getGUID() end
+  return state
+end
+
+local function dominanceFrozen(row)
+  return row ~= nil and row.dom ~= nil and row.dom.frozen ~= false
+end
+
+local function dominanceKindLabel(dom)
+  if dom ~= nil and dom.kind == "brazen_demagogue" then
+    return "Brazen Demagogue (still scoring)"
+  end
+  return "standard (frozen)"
+end
+
+local function registerDominance(row, state)
+  local suit = state and state.suit or nil
   if row == nil or row.dom ~= nil or not DOM_SUITS[suit] then return false end
+  local brazen = (state.trackCount or 0) > 0
   row.dom = { turn = currentTurnNumber(),
     round = math.max(1, math.floor(S.turns / math.max(1, #S.rows)) + 1),
-    suit = suit, score = row.score, won = false }
+    suit = suit, score = row.score, won = false,
+    kind = brazen and "brazen_demagogue" or "standard",
+    frozen = not brazen,
+    markerGuid = state.domMarker and state.domMarker.getGUID() or nil }
   logev("dominance", row.fac, row.dom.turn, suit)
   return true
 end
@@ -443,7 +500,9 @@ end
 local function cancelDominance(row)
   if row == nil or row.dom == nil then return false end
   local dom = row.dom
-  row.score = tonumber(dom.score) or row.score
+  -- Standard dominance restores its declaration-time score. Brazen has kept
+  -- reading the original track marker, so rewinding here would discard VP.
+  if dom.frozen ~= false then row.score = tonumber(dom.score) or row.score end
   row.dom = nil
   if S.winner == row.fac and S.winnerReason == "dominance" then
     S.winner = nil
@@ -452,6 +511,40 @@ local function cancelDominance(row)
   end
   logev("dominance-undo", row.fac, dom.turn, dom.suit)
   return true
+end
+
+-- true = the declaration marker is still on a card; false = it settled away;
+-- nil = it is currently held/moving, so do not make a transient state change.
+local function dominanceMarkerActive(row, state, cards)
+  if row == nil or row.dom == nil then return false end
+  local guid = row.dom.markerGuid
+  if guid ~= nil and guid ~= "" then
+    local marker = getObjectFromGUID(guid)
+    if marker == nil or (marker.getName() or "") ~= (row.fac .. " VP") then
+      return false
+    end
+    if not objectSettled(marker) then return nil end
+    return dominanceAt(marker, cards) ~= nil
+  end
+  -- Migrate an already-active declaration saved by a pre-markerGuid build.
+  if state.domMarker ~= nil then
+    row.dom.markerGuid = state.domMarker.getGUID()
+    return true
+  end
+  if state.unsettledCount > 0 then return nil end
+  return false
+end
+
+local function syncDominance(row, cards, objects)
+  local state = dominanceMarkerState(row, cards, objects)
+  local changed = false
+  if row.dom ~= nil and dominanceMarkerActive(row, state, cards) == false then
+    changed = cancelDominance(row) or changed
+  end
+  if row.dom == nil and state.domCount > 0 then
+    changed = registerDominance(row, state) or changed
+  end
+  return state, changed
 end
 
 -- Track orientation is NOT inferred: on every map in this mod the printed 0
@@ -1110,33 +1203,34 @@ local function poll()
   end
   if TRACK == nil then return end
 
+  local objects = getAllObjects()
   local domCards = {}
-  for _, o in ipairs(getAllObjects()) do
+  local vpMarkers = {}
+  for _, o in ipairs(objects) do
     local n = o.getName() or ""
     local fac = n:match("^(.+) VP$")
-    if fac and rowByFac(fac) == nil and readCell(o) ~= nil then
-      addRow(fac, o)
-      refreshAssets()
-      dirty = true
+    if fac then
+      vpMarkers[fac] = vpMarkers[fac] or {}
+      table.insert(vpMarkers[fac], o)
+      if rowByFac(fac) == nil and readCell(o) ~= nil then
+        addRow(fac, o)
+        refreshAssets()
+        dirty = true
+      end
     end
     local suit = dominanceCardSuit(o)
     if suit then table.insert(domCards, { obj = o, suit = suit }) end
   end
 
-  for ri, row in ipairs(S.rows) do
-    local m = findMarker(row)
-    -- A declaration follows the settled marker. Picking it up or moving it
-    -- causes no transient change; settling it back on the VP track cancels the
-    -- declaration and restores the last real score kept in row.dom.score.
-    if row.dom ~= nil and objectSettled(m) and readCell(m) ~= nil then
-      if cancelDominance(row) then dirty = true end
-    end
-    if row.dom == nil and m ~= nil then
-      local suit = dominanceAt(m, domCards)
-      if suit and registerDominance(row, suit) then dirty = true end
-    end
-    -- While dominance remains active, the retained track score is immutable.
-    local idx = (row.dom == nil and objectSettled(m)) and readCell(m) or nil
+  for _, row in ipairs(S.rows) do
+    -- Count all same-faction copies. The declaration follows its specific
+    -- settled card marker; held/moving markers cause no transient change.
+    local markerState, domChanged = syncDominance(row, domCards,
+      vpMarkers[row.fac] or {})
+    if domChanged then dirty = true end
+    -- Standard dominance freezes. Brazen keeps reading the separate settled
+    -- marker on the VP track and locks ordinary numeric scores.
+    local idx = (not dominanceFrozen(row)) and markerState.trackIdx or nil
     if idx ~= nil then
       local sc = cellToScore(idx)
       if sc ~= row.score then
@@ -1304,33 +1398,30 @@ end
 function lockRow(i)
   local row = S.rows[i]
   if row == nil then return end
-  local m = findMarker(row)
-  -- A quick turn pass can beat the poll in either direction. Honour a settled
-  -- return to the VP track before deciding whether this turn is a dom turn.
-  if row.dom ~= nil and objectSettled(m) and readCell(m) ~= nil then
-    cancelDominance(row)
+  -- A quick turn pass can beat the poll in either direction, so count every
+  -- settled copy here too before the turn number advances.
+  local objects = getAllObjects()
+  local domCards = {}
+  local rowMarkers = {}
+  for _, o in ipairs(objects) do
+    local suit = dominanceCardSuit(o)
+    if suit then table.insert(domCards, { obj = o, suit = suit }) end
+    if (o.getName() or "") == (row.fac .. " VP") then
+      table.insert(rowMarkers, o)
+    end
   end
+  local markerState = syncDominance(row, domCards, rowMarkers)
   -- the game is over once someone reached 30: nothing locks any more
   if S.winner ~= nil then return end
   -- re-read the marker right now: the polled score can be a beat stale, and a
   -- lock is forever (it is what gets exported)
-  if row.dom == nil then
-    -- A quick turn pass can beat the 1.2-second poll. Check for dominance here
-    -- too, before S.turns increments, so the recorded turn cannot slip by one.
-    local domCards = {}
-    for _, o in ipairs(getAllObjects()) do
-      local suit = dominanceCardSuit(o)
-      if suit then table.insert(domCards, { obj = o, suit = suit }) end
-    end
-    local suit = m and dominanceAt(m, domCards) or nil
-    if not (suit and registerDominance(row, suit)) then
-      local idx = objectSettled(m) and readCell(m) or nil
-      if idx ~= nil then
-        local sc = cellToScore(idx)
-        if sc ~= row.score then
-          logev("score", row.fac, row.score, sc)
-          row.score = sc
-        end
+  if not dominanceFrozen(row) then
+    local idx = markerState.trackIdx
+    if idx ~= nil then
+      local sc = cellToScore(idx)
+      if sc ~= row.score then
+        logev("score", row.fac, row.score, sc)
+        row.score = sc
       end
     end
   end
@@ -1398,7 +1489,7 @@ end
 
 local function nudge(i, delta)
   local row = S.rows[i]
-  if row == nil or row.dom ~= nil or TRACK == nil then return end
+  if row == nil or dominanceFrozen(row) or TRACK == nil then return end
   local m = findMarker(row)
   if m == nil then dbg("BoxScore: cannot find " .. row.fac .. " VP") return end
   if m.held_by_color ~= nil then return end
@@ -1811,7 +1902,7 @@ local function cellText(row, r)
   local e = row.edits[tostring(r)]
   -- Keep numeric locks internally so cancel can reveal the ordinary score
   -- history again, but never print a dominance-era score while dom is active.
-  if row.dom ~= nil and r >= row.dom.round
+  if dominanceFrozen(row) and r >= row.dom.round
     and (e ~= nil or r <= #row.locks) then return "-" end
   if e ~= nil then return e end
   local v = row.locks[r]
@@ -1857,7 +1948,8 @@ function boxText()
       table.insert(lines, "  > " .. row.variant)
     end
     if row.dom ~= nil then
-      table.insert(lines, "  > dominance: turn " .. tostring(row.dom.turn)
+      table.insert(lines, "  > dominance: " .. dominanceKindLabel(row.dom)
+        .. ", turn " .. tostring(row.dom.turn)
         .. ", " .. tostring(row.dom.suit)
         .. ", won: " .. ((row.dom.won == true) and "yes" or "no"))
     end
@@ -2126,7 +2218,7 @@ function rebuildUI()
     end
     local live = row.score >= 0 and tostring(row.score) or "&#8211;"
     local liveFont = 16
-    if row.dom ~= nil then
+    if dominanceFrozen(row) then
       live = (row.dom.won == true) and "dom win" or "-"
       liveFont = 10
     end
@@ -2134,7 +2226,7 @@ function rebuildUI()
     add('<Panel preferredWidth="' .. liveW .. '" color="' .. GOLD .. '"' .. NOClick .. '>'
       .. '<Text fontSize="' .. liveFont .. '" fontStyle="Bold" color="' .. INKTXT .. '" alignment="MiddleCenter"' .. NOClick .. '>'
       .. live .. '</Text></Panel>')
-    if row.dom ~= nil then
+    if dominanceFrozen(row) then
       add('<Text preferredWidth="28"' .. NOClick .. '> </Text>')
       add('<Text preferredWidth="28"' .. NOClick .. '> </Text>')
     else
@@ -2245,7 +2337,7 @@ function rebuildUI()
       end
     end
     section("SCORES", 30,
-      "Read automatically from VP markers. Settle one on a fox, mouse, rabbit or bird Dominance card to freeze that row at -; return it to the VP track to cancel. The dom tag records turn and suit, and dom win toggles a dominance victory. A marker reaching 30 ends the game.")
+      "Read automatically from VP markers. A settled marker on a fox, mouse, rabbit or bird Dominance card records turn and suit and offers dom win. With no same-faction marker on the score track this is standard dominance and freezes at -; with a second marker still on the track it is Brazen Demagogue and keeps scoring. Removing the card marker cancels either kind. A track marker reaching 30 ends the game.")
     section("TURNS", 44,
       "Everything runs automatically once the TTS turn order is set and every faction has its seated player: each turn pass records the finishing faction by itself. Without that, END TURN records the highlighted faction. A lock always writes the highlighted round column, overwriting whatever it holds.")
     section("EDIT", 44,
@@ -2450,6 +2542,10 @@ function onLoad(saved)
       row.dom.suit = tostring(row.dom.suit or ""):lower()
       row.dom.score = tonumber(row.dom.score) or row.score
       row.dom.won = row.dom.won == true
+      local brazen = row.dom.kind == "brazen_demagogue" or row.dom.frozen == false
+      row.dom.kind = brazen and "brazen_demagogue" or "standard"
+      row.dom.frozen = not brazen
+      if row.dom.markerGuid == "" then row.dom.markerGuid = nil end
       if row.dom.won then domWinner = row.fac end
     end
   end
