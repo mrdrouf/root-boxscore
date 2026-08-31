@@ -383,13 +383,17 @@ end
 -- Dominance is declared by physically putting the VP marker on the card. Use
 -- the card's live bounds (rather than CardIDs, which differ among deck copies)
 -- and require both objects to have settled before accepting the placement.
-local function markerSitsOnCard(marker, card)
-  if marker == nil or card == nil or marker.held_by_color ~= nil
-    or card.held_by_color ~= nil then return false end
-  local okm, moving = pcall(function() return marker.isSmoothMoving() end)
+local function objectSettled(o)
+  if o == nil or o.held_by_color ~= nil then return false end
+  local okm, moving = pcall(function() return o.isSmoothMoving() end)
   if okm and moving then return false end
-  local okc, cardMoving = pcall(function() return card.isSmoothMoving() end)
-  if okc and cardMoving then return false end
+  local okr, resting = pcall(function() return o.resting end)
+  if okr and resting == false then return false end
+  return true
+end
+
+local function markerSitsOnCard(marker, card)
+  if not objectSettled(marker) or not objectSettled(card) then return false end
   local okb, b = pcall(function() return card.getBounds() end)
   if not okb or b == nil or b.center == nil or b.size == nil then return false end
   local mp = marker.getPosition()
@@ -417,6 +421,20 @@ local function registerDominance(row, suit)
     round = math.max(1, math.floor(S.turns / math.max(1, #S.rows)) + 1),
     suit = suit, score = row.score, won = false }
   logev("dominance", row.fac, row.dom.turn, suit)
+  return true
+end
+
+local function cancelDominance(row)
+  if row == nil or row.dom == nil then return false end
+  local dom = row.dom
+  row.score = tonumber(dom.score) or row.score
+  row.dom = nil
+  if S.winner == row.fac and S.winnerReason == "dominance" then
+    S.winner = nil
+    S.winnerReason = nil
+    S.winnerLock = nil
+  end
+  logev("dominance-undo", row.fac, dom.turn, dom.suit)
   return true
 end
 
@@ -1042,13 +1060,18 @@ local function poll()
 
   for ri, row in ipairs(S.rows) do
     local m = findMarker(row)
+    -- A declaration follows the settled marker. Picking it up or moving it
+    -- causes no transient change; settling it back on the VP track cancels the
+    -- declaration and restores the last real score kept in row.dom.score.
+    if row.dom ~= nil and objectSettled(m) and readCell(m) ~= nil then
+      if cancelDominance(row) then dirty = true end
+    end
     if row.dom == nil and m ~= nil then
       local suit = dominanceAt(m, domCards)
       if suit and registerDominance(row, suit) then dirty = true end
     end
-    -- Once dominance is registered, the last track score is immutable. The
-    -- marker may later move anywhere and no score read can change this row.
-    local idx = (row.dom == nil and m) and readCell(m) or nil
+    -- While dominance remains active, the retained track score is immutable.
+    local idx = (row.dom == nil and objectSettled(m)) and readCell(m) or nil
     if idx ~= nil then
       local sc = cellToScore(idx)
       if sc ~= row.score then
@@ -1216,12 +1239,17 @@ end
 function lockRow(i)
   local row = S.rows[i]
   if row == nil then return end
+  local m = findMarker(row)
+  -- A quick turn pass can beat the poll in either direction. Honour a settled
+  -- return to the VP track before deciding whether this turn is a dom turn.
+  if row.dom ~= nil and objectSettled(m) and readCell(m) ~= nil then
+    cancelDominance(row)
+  end
   -- the game is over once someone reached 30: nothing locks any more
   if S.winner ~= nil then return end
   -- re-read the marker right now: the polled score can be a beat stale, and a
   -- lock is forever (it is what gets exported)
   if row.dom == nil then
-    local m = findMarker(row)
     -- A quick turn pass can beat the 1.2-second poll. Check for dominance here
     -- too, before S.turns increments, so the recorded turn cannot slip by one.
     local domCards = {}
@@ -1231,7 +1259,7 @@ function lockRow(i)
     end
     local suit = m and dominanceAt(m, domCards) or nil
     if not (suit and registerDominance(row, suit)) then
-      local idx = m and readCell(m) or nil
+      local idx = objectSettled(m) and readCell(m) or nil
       if idx ~= nil then
         local sc = cellToScore(idx)
         if sc ~= row.score then
@@ -1712,6 +1740,10 @@ end
 
 local function cellText(row, r)
   local e = row.edits[tostring(r)]
+  -- Keep numeric locks internally so cancel can reveal the ordinary score
+  -- history again, but never print a dominance-era score while dom is active.
+  if row.dom ~= nil and r >= row.dom.round
+    and (e ~= nil or r <= #row.locks) then return "-" end
   if e ~= nil then return e end
   local v = row.locks[r]
   if v == nil or v < 0 then return "" end
@@ -1967,7 +1999,7 @@ function rebuildUI()
         .. '" spacing="1" childForceExpandHeight="false">')
       add('<Text fontSize="9" fontStyle="Bold" color="' .. RUST
         .. '" preferredHeight="16" alignment="MiddleCenter"' .. NOClick .. '>dom '
-        .. esc(row.dom.suit) .. ' &#183; T' .. tostring(row.dom.turn) .. '</Text>')
+        .. esc(row.dom.suit) .. ' T' .. tostring(row.dom.turn) .. '</Text>')
       add('<Button id="domwin_' .. i .. '" fontSize="10" fontStyle="Bold" preferredHeight="18" '
         .. ((row.dom.won == true) and BTN_GOLD or BTN_SOFT)
         .. ' text="dom win" onClick="uiRowBtn"/>')
@@ -2019,9 +2051,14 @@ function rebuildUI()
       add('</Panel>')
     end
     local live = row.score >= 0 and tostring(row.score) or "&#8211;"
+    local liveFont = 16
+    if row.dom ~= nil then
+      live = (row.dom.won == true) and "dom win" or "-"
+      liveFont = 10
+    end
     add('<Text preferredWidth="10"' .. NOClick .. '> </Text>')
     add('<Panel preferredWidth="' .. liveW .. '" color="' .. GOLD .. '"' .. NOClick .. '>'
-      .. '<Text fontSize="16" fontStyle="Bold" color="' .. INKTXT .. '" alignment="MiddleCenter"' .. NOClick .. '>'
+      .. '<Text fontSize="' .. liveFont .. '" fontStyle="Bold" color="' .. INKTXT .. '" alignment="MiddleCenter"' .. NOClick .. '>'
       .. live .. '</Text></Panel>')
     if row.dom ~= nil then
       add('<Text preferredWidth="28"' .. NOClick .. '> </Text>')
@@ -2134,7 +2171,7 @@ function rebuildUI()
       end
     end
     section("SCORES", 30,
-      "Read automatically from VP markers. Put one on a fox, mouse, rabbit or bird Dominance card to freeze that row; its dom tag records the turn and suit, and dom win records a dominance victory. A marker reaching 30 ends the game.")
+      "Read automatically from VP markers. Settle one on a fox, mouse, rabbit or bird Dominance card to freeze that row at -; return it to the VP track to cancel. The dom tag records turn and suit, and dom win toggles a dominance victory. A marker reaching 30 ends the game.")
     section("TURNS", 44,
       "Everything runs automatically once the TTS turn order is set and every faction has its seated player: each turn pass records the finishing faction by itself. Without that, END TURN records the highlighted faction. A lock always writes the highlighted round column, overwriting whatever it holds.")
     section("EDIT", 44,
