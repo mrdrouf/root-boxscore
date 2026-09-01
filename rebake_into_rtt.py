@@ -134,9 +134,9 @@ end
     )
     source = replace_once(
         source,
-        "    if row.dom ~= nil then\n"
+        "    if dominanceFrozen(row) then\n"
         "      add('<Text preferredWidth=\"28\"' .. NOClick .. '> </Text>')\n",
-        "    if placeholder or row.dom ~= nil then\n"
+        "    if placeholder or dominanceFrozen(row) then\n"
         "      add('<Text preferredWidth=\"28\"' .. NOClick .. '> </Text>')\n",
         "placeholder score-button guard",
     )

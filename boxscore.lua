@@ -7,12 +7,11 @@
 -- in the map's LOCAL coordinates - any map, anywhere, any rotation. A marker's
 -- score is the nearest track column to positionToLocal(marker position).
 --
--- Turn integration: row order follows physical hand-zone/seat positions, the
+-- Turn integration: row order follows each faction's physical seat position, the
 -- active faction follows Turns.turn_color, and every turn pass locks the score
--- of the faction whose turn just ended. Seats are matched to factions by every
--- color's hand zone <-> "<Faction> Supply" distance (the supply bag sits with
--- the faction board in front of its player), independent of whether that color
--- currently has a live player. Live players supply display names only. Without
+-- of the faction whose turn just ended. RTT publishes faction-keyed seats; other
+-- tables fall back to the faction supply/board anchor itself. Hand zones are used
+-- only to associate factions with player colors and live display names. Without
 -- the turn system, END TURN cycles the rows manually.
 --
 -- The object IS the sheet: the walnut slab resizes itself to exactly match
@@ -721,10 +720,9 @@ local PLAYER_COLORS = {
   "Green", "Teal", "Blue", "Purple", "Pink",
 }
 
--- RTT (the tournament mod) publishes each faction's EXACT seat position (player colour -> {x,z})
--- via Global "RTT_SEAT_POS" as factions are placed. Prefer it: it is the true physical seat and
--- works even when no live player occupies the colour (the hand-zone geometry fails in that case,
--- which is why the order looked like pick order in the manual boards).
+-- RTT publishes each faction's exact seat position (faction id -> {x,z}) via
+-- Global "RTT_SEAT_POS" as factions are placed. It stays a JSON string because
+-- raw Lua tables cannot cross object-script boundaries.
 local function rttSeatPosMap()
   local ok, raw = pcall(function() return Global.getVar("RTT_SEAT_POS") end)
   if ok and type(raw) == "string" and raw ~= "" then
@@ -734,16 +732,10 @@ local function rttSeatPosMap()
   return nil
 end
 
-local function seatPositions()
+-- These color positions are only for associating a row with TTS's turn/player
+-- color. They are deliberately not an input to box-score row ordering.
+local function colorSeatPositions()
   local positions, count = {}, 0
-  local rtt = rttSeatPosMap()
-  if rtt ~= nil then
-    for color, p in pairs(rtt) do
-      local x, z = (p[1] or p.x), (p[2] or p.z)
-      if x ~= nil and z ~= nil then positions[color] = { x = x, z = z }; count = count + 1 end
-    end
-    if count > 0 then return positions, count end
-  end
   for _, color in ipairs(PLAYER_COLORS) do
     local ok, ht = pcall(function() return Player[color].getHandTransform() end)
     local pos = ok and ht and ht.position or nil
@@ -768,7 +760,7 @@ end
 -- to the nearest color hand zone, greedily one-to-one. Live occupancy is used
 -- only to attach a Steam name; it never controls the row's color/seat.
 local function refreshSeats(byName)
-  local positions, seatCount = seatPositions()
+  local positions, seatCount = colorSeatPositions()
   if seatCount == 0 then return false end
   local liveNames = {}
   for _, p in ipairs(Player.getPlayers()) do
@@ -854,24 +846,59 @@ local function fullTurnCoverage()
   return true
 end
 
--- Row order is always physical seat order, even while RTT's TTS turn system is
--- running: RTT assembles Turns.order in draft/roster order. Matched rows sort
--- clockwise by their color's hand-zone position whether occupied or empty;
--- rows with no usable seat stay last. Original indices make every pass stable.
+-- RTT uses full placement ids while box-score rows use the short VP-marker ids.
+-- Keep the direct row.fac lookup authoritative and bridge only those known names.
+local RTT_FACTION_ID = {
+  Marquise = "Marquise de Cat", Eyrie = "Eyrie Dynasties",
+  Alliance = "Woodland Alliance", Riverfolk = "Riverfolk Company",
+  Lizard = "The Lizard Cult", Duchy = "Underground Duchy",
+  Crows = "Corvid Conspiracy", Rats = "Lord of the Hundreds",
+  Badgers = "Keepers in Iron", Knaves = "Knaves of the Deepwood",
+  Council = "Twilight Council", Diaspora = "Lilypad Diaspora",
+}
+
+local function factionSeatPosition(row, rtt)
+  local p = nil
+  if rtt ~= nil then p = rtt[row.fac] or rtt[RTT_FACTION_ID[row.fac]] end
+  if p ~= nil then
+    local x, z = (p[1] or p.x), (p[2] or p.z)
+    if x ~= nil and z ~= nil then return { x = x, z = z } end
+  end
+  local anchor = facAnchor(row.fac, seatAnchorByName)
+  if anchor == nil then return nil end
+  local ok, pos = pcall(function() return anchor.getPosition() end)
+  if ok and pos ~= nil and pos.x ~= nil and pos.z ~= nil then return pos end
+  return nil
+end
+
+-- Refreshed from the poll's object-name index immediately before seatOrder.
+-- Keeping it here avoids a second full-table scan while keeping row order
+-- independent of player colors and hand zones.
+local seatAnchorByName = {}
+
+-- Row order is always physical faction-seat order, even while RTT's TTS turn
+-- system is running. The faction-keyed RTT map wins; a missing entry falls back
+-- to that row's physical faction anchor. Unknown rows stay last. Original
+-- indices make every pass stable, and the manual up-arrow disables this sorter.
 local function seatOrder()
   if S.manualOrder then return false end
-  local hands, seatCount = seatPositions()
-  if seatCount == 0 then return false end
+  local rtt = rttSeatPosMap()
   local before, original = {}, {}
-  for i, r in ipairs(S.rows) do before[i], original[r] = r, i end
+  local positions, seatCount = {}, 0
+  for i, r in ipairs(S.rows) do
+    before[i], original[r] = r, i
+    positions[r] = factionSeatPosition(r, rtt)
+    if positions[r] ~= nil then seatCount = seatCount + 1 end
+  end
+  if seatCount == 0 then return false end
   resort(function(x, y)
-    local px, py = x.color and hands[x.color], y.color and hands[y.color]
+    local px, py = positions[x], positions[y]
     if px == nil or py == nil then
       if px ~= nil then return true end
       if py ~= nil then return false end
       return original[x] < original[y]
     end
-    -- clockwise from directly-right (+X): seat 1 (right) at top ... seat 4 (left) at bottom
+    -- clockwise from directly-right (+X): seat 1 is first, proceeding to the left
     local ax = math.atan2(-px.z, px.x); if ax < 0 then ax = ax + 2 * math.pi end
     local ay = math.atan2(-py.z, py.x); if ay < 0 then ay = ay + 2 * math.pi end
     if math.abs(ax - ay) > 0.000001 then return ax < ay end
@@ -1404,6 +1431,7 @@ local function poll()
       local bag = facAnchor(row.fac, byName)
       if bag then SUPPLYPOS[row.fac] = bag.getPosition() end
     end
+    seatAnchorByName = byName
     if refreshSeats(byName) then dirty = true end
     if seatOrder() then dirty = true end
     if refreshDeck() then dirty = true end
