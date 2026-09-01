@@ -543,6 +543,21 @@ local function syncDominance(row, cards, objects)
   if row.dom == nil and state.domCount > 0 then
     changed = registerDominance(row, state) or changed
   end
+  -- Re-classify a STILL-ACTIVE declaration when the track copy changes. Brazen Demagogue needs a marker
+  -- on the track AND one on a dominance card. If the maintainer copied a marker onto the card (registered
+  -- brazen, still scoring) and then ERASED the original track marker, it is now a STANDARD dominance play:
+  -- freeze the score and show the hyphen. The reverse (a standard play that later gains a track copy)
+  -- becomes brazen and resumes scoring.
+  if row.dom ~= nil and dominanceMarkerActive(row, state, cards) == true then
+    local wantBrazen = (state.trackCount or 0) > 0
+    if wantBrazen and row.dom.kind ~= "brazen_demagogue" then
+      row.dom.kind = "brazen_demagogue"; row.dom.frozen = false
+      changed = true; logev("dominance-reclass", row.fac, "brazen")
+    elseif (not wantBrazen) and row.dom.kind == "brazen_demagogue" then
+      row.dom.score = row.score; row.dom.kind = "standard"; row.dom.frozen = true
+      changed = true; logev("dominance-reclass", row.fac, "standard")
+    end
+  end
   return state, changed
 end
 
