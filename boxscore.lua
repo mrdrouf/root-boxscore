@@ -591,6 +591,7 @@ local BOARD_ART = {
 }
 
 local function facAnchor(fac, byName)
+  byName = byName or {}   -- defensive: never index a nil table (audit: seat-box crash)
   local o = byName[fac .. " Supply"]
   if o == nil and SUPPLY_ALIAS[fac] ~= nil then
     o = byName[SUPPLY_ALIAS[fac] .. " Supply"]
@@ -857,6 +858,11 @@ local RTT_FACTION_ID = {
   Council = "Twilight Council", Diaspora = "Lilypad Diaspora",
 }
 
+-- Object-name index of each faction's supply anchor, refreshed by the poll (see ~line 1434) just
+-- before seatOrder. Declared HERE, ABOVE factionSeatPosition, so the function captures this upvalue
+-- rather than a nil GLOBAL -- otherwise the physical-anchor fallback threw 'index a nil value' on any
+-- non-RTT / Vagabond row and aborted the whole poll pass (audit: seat-box).
+local seatAnchorByName = {}
 local function factionSeatPosition(row, rtt)
   local p = nil
   if rtt ~= nil then p = rtt[row.fac] or rtt[RTT_FACTION_ID[row.fac]] end
@@ -871,10 +877,7 @@ local function factionSeatPosition(row, rtt)
   return nil
 end
 
--- Refreshed from the poll's object-name index immediately before seatOrder.
--- Keeping it here avoids a second full-table scan while keeping row order
--- independent of player colors and hand zones.
-local seatAnchorByName = {}
+-- (seatAnchorByName is declared above factionSeatPosition; the poll assigns it before seatOrder.)
 
 -- Row order is always physical faction-seat order, even while RTT's TTS turn
 -- system is running. The faction-keyed RTT map wins; a missing entry falls back
