@@ -1700,6 +1700,15 @@ function uiOverlayClose()
   rebuildUI()
 end
 
+-- COPY: TTS Lua has no OS-clipboard access, so the closest honest thing is
+-- a selectable box holding the JSON - one Ctrl+A + Ctrl+C away. The text is
+-- injected via setAttribute AFTER the rebuild because entities in XML
+-- attributes never decode (a JSON quote would wreck the parse).
+function uiCopy()
+  S.overlay = (S.overlay == "copy") and nil or "copy"
+  rebuildUI()
+end
+
 function uiExport(player)
   local by = player and player.steam_name or ""
   S.exportBy = by
@@ -2335,6 +2344,8 @@ function rebuildUI()
       .. ' text="END TURN" onClick="uiEndTurn"/>')
   end
   add('<Button fontSize="12" fontStyle="Bold" preferredWidth="66" ' .. BTN_SOFT .. ' text="EXPORT" onClick="uiExport"/>')
+  add('<Button fontSize="12" fontStyle="Bold" preferredWidth="52" '
+    .. ((S.overlay == "copy") and BTN_GOLD or BTN_SOFT) .. ' text="COPY" onClick="uiCopy"/>')
   add('<Button fontSize="12" fontStyle="Bold" preferredWidth="56" ' .. (S.setup and BTN_GOLD or BTN_SOFT)
     .. ' text="' .. (S.setup and "DONE" or "EDIT") .. '" onClick="uiSetup"/>')
   add('<Button fontSize="12" fontStyle="Bold" preferredWidth="52" '
@@ -2406,8 +2417,22 @@ function rebuildUI()
       end
     end
     add('</VerticalLayout></Panel>')
+  elseif S.overlay == "copy" then
+    add('<Panel width="' .. (W - 160) .. '" height="210" color="' .. WALNUT .. '">')
+    add('<VerticalLayout padding="12 12 10 8" spacing="5" childForceExpandHeight="false">')
+    add('<Text fontSize="12" fontStyle="Bold" color="' .. PARCH .. '" preferredHeight="16"'
+      .. ' alignment="MiddleLeft"' .. NOClick
+      .. '>the box-score record as JSON &#8211; click the box, select all (Ctrl+A), copy (Ctrl+C)</Text>')
+    add('<InputField id="cpyfld" fontSize="10" preferredHeight="130" lineType="MultiLineNewLine"'
+      .. ' colors="#F1E5C8|#FFFFFF|#FFFFFF|#00000000" textColor="' .. INKTXT .. '" text=" "/>')
+    add('<HorizontalLayout preferredHeight="26" spacing="6" childForceExpandWidth="false">')
+    add('<Text flexibleWidth="1"' .. NOClick .. '> </Text>')
+    add('<Button fontSize="12" fontStyle="Bold" preferredWidth="70" ' .. BTN_GOLD
+      .. ' text="DONE" onClick="uiOverlayClose"/>')
+    add('</HorizontalLayout>')
+    add('</VerticalLayout></Panel>')
   elseif S.overlay == "info" then
-    add('<Panel width="' .. (W - 110) .. '" height="420" color="' .. WALNUT .. '">')
+    add('<Panel width="' .. (W - 110) .. '" height="430" color="' .. WALNUT .. '">')
     add('<VerticalLayout padding="20 20 14 10" spacing="3">')
     local function section(t, h, b, last)
       add('<Text fontSize="12" fontStyle="Bold" color="' .. GOLD .. '" preferredHeight="17"'
@@ -2424,8 +2449,8 @@ function rebuildUI()
       "Everything runs automatically once the TTS turn order is set and every faction has its seated player: each turn pass records the finishing faction by itself. Without that, END TURN records the highlighted faction. A lock always writes the highlighted round column, overwriting whatever it holds.")
     section("EDIT", 44,
       "Correct anything: scores (click a cell), the round (click a column number), whose turn it is (click a portrait), faction order (&#9650;), player names, the Eyrie commander / Knaves captains / vagabond character (&#9660;), map, deck, game name and the unpicked faction.")
-    section("EXPORT", 30,
-      "Posts the box score to Discord (set the webhook under DISCORD) and to the notebook. The footer reads confirmed with Discord once Discord has acknowledged the message.")
+    section("EXPORT", 40,
+      "Posts the box score to Discord (set the webhook under DISCORD) and to the notebook. The footer reads confirmed with Discord once Discord has acknowledged the message. COPY opens the same record as selectable JSON &#8211; click the box, Ctrl+A, Ctrl+C.")
     section("CRAFT", 44,
       "Watches the map's item supply. An item taken from it and placed by a faction's board is recorded as crafted that round, with its picture on the round's score cell. Returning an item to the supply cancels the craft. In EDIT, the ITEMS button corrects or adds crafts: click T# to pick the round, &#215; removes, + adds. Turning CRAFT off hides all crafts, exports included.")
     section("RESET", 16,
@@ -2574,6 +2599,15 @@ function rebuildUI()
 
   add('</Panel>')
   self.UI.setXml(table.concat(x))
+  -- the JSON goes in AFTER the rebuild: setAttribute takes the raw string,
+  -- while XML attributes never decode entities (quotes would break parsing)
+  if S.overlay == "copy" then
+    Wait.time(function()
+      pcall(function()
+        self.UI.setAttribute("cpyfld", "text", JSON.encode(exportPayload("copy")))
+      end)
+    end, 0.2)
+  end
 end
 
 ---------------------------------------------------------------- persistence --

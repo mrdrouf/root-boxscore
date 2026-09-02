@@ -46,11 +46,15 @@ def block(lua, webhook=""):
         "GUID": "%06x" % random.randrange(16 ** 6),
         "Name": "BlockSquare",
         "Transform": {
-            "posX": 0.0, "posY": 2.0, "posZ": 0.0,
-            "rotX": 0.0, "rotY": 0.0, "rotZ": 0.0,
-            # a flat cardboard sheet, slightly larger than the panel so the
-            # walnut rim stays visible as the grab zone
-            "scaleX": 30.0, "scaleY": 0.18, "scaleZ": 10.0,
+            # the RTT mod's default spot: centre of the maintainer's
+            # box-score rectangle, left of the map, on the table surface
+            # (this mod's table top is at y ~ 11.65 - lower spawns land
+            # INSIDE the table). Menu drops follow the cursor, but pastes
+            # and scripted spawns land exactly here, and the 270 rotation
+            # applies either way.
+            "posX": -58.36, "posY": 11.652, "posZ": -0.05,
+            "rotX": 0.0, "rotY": 270.0, "rotZ": 0.0,
+            "scaleX": 33.18, "scaleY": 0.18, "scaleZ": 9.07,
         },
         "Nickname": NAME,
         "Description": (
