@@ -932,13 +932,22 @@ end
 -- does not control row order; physical seat geometry above is authoritative.
 local function followTurns()
   if not fullTurnCoverage() then return false end
-  local changed = false
   local tc = Turns.turn_color
+  -- The FIRST turn of the game is ALWAYS the first player. Until a turn has
+  -- actually been recorded (S.turns == 0), pin the pointer to Turns.order[1]
+  -- - the first player - regardless of how late that faction's row joined the
+  -- sheet or whether turn_color was momentarily empty or nudged during setup.
+  -- Once real turns start recording, follow the live turn_color normally, so
+  -- every later round's first turn lands on the first player by itself too.
+  if (S.turns or 0) == 0 then
+    local first = Turns.order and Turns.order[1] or nil
+    if first and first ~= "" then tc = first end
+  end
   if tc and tc ~= "" then
     local i = rowByColor(tc)
-    if i and i ~= S.active then S.active = i; changed = true end
+    if i and i ~= S.active then S.active = i; return true end
   end
-  return changed
+  return false
 end
 
 --------------------------------------------------------------------- export --
@@ -2425,10 +2434,13 @@ function rebuildUI()
       .. '>the box-score record as JSON &#8211; click the box, select all (Ctrl+A), copy (Ctrl+C)</Text>')
     -- the JSON is baked straight into the field (no async setAttribute,
     -- which raced the UI build and left the box empty on a busy table).
-    -- The value sits in a single-quoted attribute, so the JSON's own double
-    -- quotes need no escaping; only ' & < are made XML-safe.
+    -- It sits in a SINGLE-quoted attribute, so the JSON's own double quotes
+    -- pass through untouched and stay valid, readable JSON; only the three
+    -- characters that would break the XML are escaped, and with the NUMERIC
+    -- entities this mod has verified TTS decodes (named ones like &amp; can
+    -- be rejected outright, which blanks the whole panel).
     local rec = JSON.encode(exportPayload("copy"))
-    rec = rec:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub("'", "&apos;")
+    rec = rec:gsub("&", "&#38;"):gsub("<", "&#60;"):gsub("'", "&#39;")
     add("<InputField id='cpyfld' fontSize='10' preferredHeight='130' lineType='MultiLineNewLine'"
       .. " colors='#F1E5C8|#FFFFFF|#FFFFFF|#00000000' textColor='" .. INKTXT .. "' text='" .. rec .. "'/>")
     add('<HorizontalLayout preferredHeight="26" spacing="6" childForceExpandWidth="false">')

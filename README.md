@@ -39,6 +39,10 @@ the RTT tournament table's default spot (left of the map); drag it anywhere.
 - **The TTS turn system is the authority.** With turns running and every row
   seated, each turn pass locks the finishing faction's score by itself. Without
   full coverage, a manual **END TURN** button appears instead — never both.
+- **The first turn is always the first player.** Until a turn is recorded, the
+  active pointer is pinned to the turn order's first player (`Turns.order[1]`),
+  no matter how late that faction's row joined the sheet; after that it follows
+  the live current player, so every later round opens on the first player too.
 - **The highlighted round column is the single truth.** A lock always writes
   that column, overwriting whatever it holds. The sheet never skips to another
   column. If the count is off, click the correct column number in EDIT — the
