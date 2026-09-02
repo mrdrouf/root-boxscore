@@ -1707,22 +1707,6 @@ end
 function uiCopy()
   S.overlay = (S.overlay == "copy") and nil or "copy"
   rebuildUI()
-  if S.overlay == "copy" then
-    -- try the optional local clipboard helper (tools/clipboard_helper.py):
-    -- if it answers, the record is already on the host's clipboard and the
-    -- overlay title says so; without it, the selectable box does the job
-    pcall(function()
-      WebRequest.custom("http://127.0.0.1:8790/clip", "POST", false,
-        JSON.encode(exportPayload("copy")), function(req)
-          if req and not req.is_error and (req.response_code or 0) == 200 then
-            pcall(function()
-              self.UI.setAttribute("cpytitle", "text",
-                "copied to the clipboard &#8211; the box below holds the same record")
-            end)
-          end
-        end)
-    end)
-  end
 end
 
 function uiExport(player)
@@ -2436,7 +2420,7 @@ function rebuildUI()
   elseif S.overlay == "copy" then
     add('<Panel width="' .. (W - 160) .. '" height="210" color="' .. WALNUT .. '">')
     add('<VerticalLayout padding="12 12 10 8" spacing="5" childForceExpandHeight="false">')
-    add('<Text id="cpytitle" fontSize="12" fontStyle="Bold" color="' .. PARCH .. '" preferredHeight="16"'
+    add('<Text fontSize="12" fontStyle="Bold" color="' .. PARCH .. '" preferredHeight="16"'
       .. ' alignment="MiddleLeft"' .. NOClick
       .. '>the box-score record as JSON &#8211; click the box, select all (Ctrl+A), copy (Ctrl+C)</Text>')
     add('<InputField id="cpyfld" fontSize="10" preferredHeight="130" lineType="MultiLineNewLine"'
@@ -2466,7 +2450,7 @@ function rebuildUI()
     section("EDIT", 44,
       "Correct anything: scores (click a cell), the round (click a column number), whose turn it is (click a portrait), faction order (&#9650;), player names, the Eyrie commander / Knaves captains / vagabond character (&#9660;), map, deck, game name and the unpicked faction.")
     section("EXPORT", 40,
-      "Posts the box score to Discord (set the webhook under DISCORD) and to the notebook. The footer reads confirmed with Discord once Discord has acknowledged the message. COPY opens the same record as selectable JSON &#8211; click the box, Ctrl+A, Ctrl+C.")
+      "Posts the box score to Discord (set the webhook under DISCORD) and to the notebook. The footer reads confirmed with Discord once Discord has acknowledged the message. COPY opens the same record as selectable JSON &#8211; click the box, Ctrl+A, Ctrl+C (no other program needed).")
     section("CRAFT", 44,
       "Watches the map's item supply. An item taken from it and placed by a faction's board is recorded as crafted that round, with its picture on the round's score cell. Returning an item to the supply cancels the craft. In EDIT, the ITEMS button corrects or adds crafts: click T# to pick the round, &#215; removes, + adds. Turning CRAFT off hides all crafts, exports included.")
     section("RESET", 16,

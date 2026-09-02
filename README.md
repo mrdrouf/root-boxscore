@@ -154,9 +154,10 @@ below); it is saved with the object.
     (metadata, rows, players, variants, locks, edits, crafts, unpicked,
     event log) to the Notebook tab `BoxScore` — machine-readable fuel for
     any external analysis.
-17. **COPY.** TTS scripts cannot reach the OS clipboard, so the COPY button
-    next to EXPORT does the closest honest thing: it opens the record as
-    JSON in a selectable box — click it, Ctrl+A, Ctrl+C.
+17. **COPY.** TTS scripts cannot reach the OS clipboard, and the sheet
+    depends on no external program, so the COPY button next to EXPORT does
+    the closest honest thing entirely in-game: it opens the record as JSON
+    in a selectable box — click it, Ctrl+A, Ctrl+C.
 
 ## Development
 
