@@ -1707,6 +1707,22 @@ end
 function uiCopy()
   S.overlay = (S.overlay == "copy") and nil or "copy"
   rebuildUI()
+  if S.overlay == "copy" then
+    -- try the optional local clipboard helper (tools/clipboard_helper.py):
+    -- if it answers, the record is already on the host's clipboard and the
+    -- overlay title says so; without it, the selectable box does the job
+    pcall(function()
+      WebRequest.custom("http://127.0.0.1:8790/clip", "POST", false,
+        JSON.encode(exportPayload("copy")), function(req)
+          if req and not req.is_error and (req.response_code or 0) == 200 then
+            pcall(function()
+              self.UI.setAttribute("cpytitle", "text",
+                "copied to the clipboard &#8211; the box below holds the same record")
+            end)
+          end
+        end)
+    end)
+  end
 end
 
 function uiExport(player)
@@ -2420,7 +2436,7 @@ function rebuildUI()
   elseif S.overlay == "copy" then
     add('<Panel width="' .. (W - 160) .. '" height="210" color="' .. WALNUT .. '">')
     add('<VerticalLayout padding="12 12 10 8" spacing="5" childForceExpandHeight="false">')
-    add('<Text fontSize="12" fontStyle="Bold" color="' .. PARCH .. '" preferredHeight="16"'
+    add('<Text id="cpytitle" fontSize="12" fontStyle="Bold" color="' .. PARCH .. '" preferredHeight="16"'
       .. ' alignment="MiddleLeft"' .. NOClick
       .. '>the box-score record as JSON &#8211; click the box, select all (Ctrl+A), copy (Ctrl+C)</Text>')
     add('<InputField id="cpyfld" fontSize="10" preferredHeight="130" lineType="MultiLineNewLine"'
