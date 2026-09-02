@@ -2047,6 +2047,15 @@ local NOClick = ' raycastTarget="false"'
 
 local lastScaleKey = ""
 
+local function renderMinRows()
+  local n = tonumber(Global.getVar("RTT_BOXSCORE_MIN"))
+  if not n then
+    local dn = tonumber(Global.getVar("RTT_DN"))
+    if dn then n = dn - 1 end
+  end
+  return math.max(1, n or 4)
+end
+
 function rebuildUI()
   if S.hidden then
     self.UI.setXml("")
@@ -2060,7 +2069,8 @@ function rebuildUI()
   local btnW = 117
   local W = 54 + iconW + facW + domW + nameW + (showR - 1) * cellW + liveW + btnW
   local rowH, headH = 40, 26
-  local H = 56 + headH + math.max(1, #S.rows) * (rowH + 3) + 42
+  local nMin = renderMinRows()
+  local H = 56 + headH + math.max(nMin, #S.rows) * (rowH + 3) + 42
   local mul = clampSizePct(S.sizePct) / 100
 
   -- The walnut cardboard extends FRAME px beyond the sheet on every side.
@@ -2190,12 +2200,15 @@ function rebuildUI()
   add('</HorizontalLayout>')
 
   -- faction rows
-  for i, row in ipairs(S.rows) do
-    local isActive = (i == S.active) and (fullTurnCoverage() or not turnsRunning())
+  local EMPTY_ROW = { fac="", player="", tintHex="3A2A1A", iconUrl="", variant="", score=-1, locks={}, edits={}, crafts=nil }
+  for i = 1, math.max(nMin, #S.rows) do
+    local row = S.rows[i] or EMPTY_ROW
+    local placeholder = (S.rows[i] == nil)
+    local isActive = (not placeholder) and (i == S.active) and (fullTurnCoverage() or not turnsRunning())
     if #S.rows == 0 then isActive = false end
     local bg = isActive and GOLDHI or ((i % 2 == 1) and "#00000000" or PARCH2)
     add('<HorizontalLayout preferredHeight="' .. rowH .. '" spacing="3" color="' .. bg .. '"' .. NOClick .. '>')
-    if S.setup then
+    if S.setup and not placeholder then
       add('<Button id="act_' .. i .. '" preferredWidth="' .. iconW
         .. '" colors="#00000000|#FFFFFFC0|' .. GOLDHI .. '|#00000000" onClick="uiRowBtn">')
       if row.iconUrl and row.iconUrl ~= "" then
@@ -2216,7 +2229,7 @@ function rebuildUI()
     add('<HorizontalLayout preferredHeight="22" spacing="2" childForceExpandWidth="false">')
     add('<Text fontSize="15" fontStyle="Bold" color="' .. INKTXT .. '" preferredWidth="'
       .. (facW - 30) .. '" alignment="MiddleLeft"' .. NOClick .. '>' .. facName .. '</Text>')
-    if S.setup and variantOptions(row.fac) then
+    if S.setup and not placeholder and variantOptions(row.fac) then
       chip("fv_" .. i, "uiRowBtn", 'colors="#00000000|#FFFFFFC0|' .. GOLDHI .. '|#00000000"',
         26, 18, "#8A7A64", "&#9660;")
     else
@@ -2242,7 +2255,7 @@ function rebuildUI()
     else
       add('<Text preferredWidth="' .. domW .. '"' .. NOClick .. '> </Text>')
     end
-    if S.setup then
+    if S.setup and not placeholder then
       add('<InputField id="nm_' .. i .. '" fontSize="15" textAlignment="MiddleCenter"'
         .. ' preferredWidth="' .. nameW
         .. '" ' .. IF_COLORS .. ' textColor="' .. RUST
@@ -2262,7 +2275,7 @@ function rebuildUI()
     end
     for r = 1, showR - 1 do
       add('<Panel preferredWidth="' .. cellW .. '"' .. NOClick .. '>')
-      if S.setup then
+      if S.setup and not placeholder then
         add('<InputField id="cl_' .. i .. '_' .. r .. '" fontSize="15" textAlignment="MiddleCenter"'
           .. ' width="' .. cellW .. '" height="' .. (rowH - 6)
           .. '" characterLimit="3" ' .. IF_COLORS .. ' textColor="' .. INKTXT
@@ -2295,19 +2308,19 @@ function rebuildUI()
     add('<Panel preferredWidth="' .. liveW .. '" color="' .. GOLD .. '"' .. NOClick .. '>'
       .. '<Text fontSize="' .. liveFont .. '" fontStyle="Bold" color="' .. INKTXT .. '" alignment="MiddleCenter"' .. NOClick .. '>'
       .. live .. '</Text></Panel>')
-    if dominanceFrozen(row) then
+    if placeholder or dominanceFrozen(row) then
       add('<Text preferredWidth="28"' .. NOClick .. '> </Text>')
       add('<Text preferredWidth="28"' .. NOClick .. '> </Text>')
     else
       chip("minus_" .. i, "uiRowBtn", BTN_SOFT, 28, 14, RUST, "&#8722;")
       chip("plus_" .. i, "uiRowBtn", BTN_SOFT, 28, 14, RUST, "+")
     end
-    if S.setup and i > 1 then
+    if S.setup and i > 1 and not placeholder then
       chip("up_" .. i, "uiRowBtn", BTN_SOFT, 26, 11, RUST, "&#9650;")
     else
       add('<Text preferredWidth="26"' .. NOClick .. '> </Text>')
     end
-    if S.setup then
+    if S.setup and not placeholder then
       chip("del_" .. i, "uiRowBtn", BTN_SOFT, 26, 11, RUST, "&#215;")
     else
       add('<Text preferredWidth="26"' .. NOClick .. '> </Text>')
