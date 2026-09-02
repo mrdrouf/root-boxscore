@@ -2423,8 +2423,14 @@ function rebuildUI()
     add('<Text fontSize="12" fontStyle="Bold" color="' .. PARCH .. '" preferredHeight="16"'
       .. ' alignment="MiddleLeft"' .. NOClick
       .. '>the box-score record as JSON &#8211; click the box, select all (Ctrl+A), copy (Ctrl+C)</Text>')
-    add('<InputField id="cpyfld" fontSize="10" preferredHeight="130" lineType="MultiLineNewLine"'
-      .. ' colors="#F1E5C8|#FFFFFF|#FFFFFF|#00000000" textColor="' .. INKTXT .. '" text=" "/>')
+    -- the JSON is baked straight into the field (no async setAttribute,
+    -- which raced the UI build and left the box empty on a busy table).
+    -- The value sits in a single-quoted attribute, so the JSON's own double
+    -- quotes need no escaping; only ' & < are made XML-safe.
+    local rec = JSON.encode(exportPayload("copy"))
+    rec = rec:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub("'", "&apos;")
+    add("<InputField id='cpyfld' fontSize='10' preferredHeight='130' lineType='MultiLineNewLine'"
+      .. " colors='#F1E5C8|#FFFFFF|#FFFFFF|#00000000' textColor='" .. INKTXT .. "' text='" .. rec .. "'/>")
     add('<HorizontalLayout preferredHeight="26" spacing="6" childForceExpandWidth="false">')
     add('<Text flexibleWidth="1"' .. NOClick .. '> </Text>')
     add('<Button fontSize="12" fontStyle="Bold" preferredWidth="70" ' .. BTN_GOLD
@@ -2599,15 +2605,6 @@ function rebuildUI()
 
   add('</Panel>')
   self.UI.setXml(table.concat(x))
-  -- the JSON goes in AFTER the rebuild: setAttribute takes the raw string,
-  -- while XML attributes never decode entities (quotes would break parsing)
-  if S.overlay == "copy" then
-    Wait.time(function()
-      pcall(function()
-        self.UI.setAttribute("cpyfld", "text", JSON.encode(exportPayload("copy")))
-      end)
-    end, 0.2)
-  end
 end
 
 ---------------------------------------------------------------- persistence --
