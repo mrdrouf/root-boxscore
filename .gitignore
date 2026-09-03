@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 # posting credential - never commit
 tools/discord_webhook.txt
+.DS_Store

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from pathlib import Path
 
 
@@ -27,40 +28,38 @@ def existing_line(lua: str, pattern: str, label: str) -> str:
 
 
 def apply_rtt_additions(source: str, existing: str) -> str:
-    """Apply the small, audited RTT fork on top of the standalone source."""
+    """Apply the RTT fork on top of the standalone source.
 
-    # Preserve RTT's release label and larger base scale from the current bake.
+    The fork used to be 13 transforms. On 2026-09-02 the placeholder-row work
+    (renderMinRows, EMPTY_ROW, the `not placeholder` guards) was merged UPSTREAM
+    into boxscore.lua, so those steps stopped matching and this script aborted
+    with "minimum RTT row height: expected one source match, found 0" -- which
+    silently blocked every box-score fix from reaching the mod.
+
+    What genuinely still differs is exactly FOUR lines, verified by diffing the
+    source against the live bake: BUILD, BASE_SCALE, showR and the ww/wh slab.
+    Two are recovered from the current bake (so they survive), two are applied
+    here. `python rebake_into_rtt.py --check` asserts a rebake of the unmodified
+    source reproduces the current bake byte-for-byte.
+    """
+
+    # Preserved from the current bake: RTT's release label and larger base scale.
     source = re.sub(
         r"^local BUILD = .*?$",
-        existing_line(existing, r"^local BUILD = .*?$", "BUILD line"),
+        lambda _m: existing_line(existing, r"^local BUILD = .*?$", "BUILD line"),
         source,
         count=1,
         flags=re.MULTILINE,
     )
     source = re.sub(
         r"^local BASE_SCALE\s*=.*?$",
-        existing_line(existing, r"^local BASE_SCALE\s*=.*?$", "BASE_SCALE line"),
+        lambda _m: existing_line(existing, r"^local BASE_SCALE\s*=.*?$", "BASE_SCALE line"),
         source,
         count=1,
         flags=re.MULTILINE,
     )
 
-    helper = '''local function renderMinRows()
-  local n = tonumber(Global.getVar("RTT_BOXSCORE_MIN"))
-  if not n then
-    local dn = tonumber(Global.getVar("RTT_DN"))
-    if dn then n = dn - 1 end
-  end
-  return math.max(1, n or 4)
-end
-
-'''
-    source = replace_once(
-        source,
-        "function rebuildUI()\n",
-        helper + "function rebuildUI()\n",
-        "renderMinRows insertion",
-    )
+    # Applied here: RTT pins the round-column count and the slab rectangle.
     source = replace_once(
         source,
         "  local showR = math.min(math.max((S.cols or 10) + 1, maxLocks + 2), 41)\n",
@@ -69,92 +68,10 @@ end
     )
     source = replace_once(
         source,
-        "  local H = 56 + headH + math.max(1, #S.rows) * (rowH + 3) + 42\n",
-        "  local nMin = renderMinRows()\n"
-        "  local H = 56 + headH + math.max(nMin, #S.rows) * (rowH + 3) + 42\n",
-        "minimum RTT row height",
-    )
-    source = replace_once(
-        source,
         "  local wh = (H + 2 * FRAME) * k\n",
         "  local wh = (H + 2 * FRAME) * k\n"
         "  ww = 31.80 wh = 10.42  -- FIXED to the maintainer 4-card box-score rectangle\n",
         "fixed RTT slab size",
-    )
-    source = replace_once(
-        source,
-        '''  -- faction rows
-  for i, row in ipairs(S.rows) do
-    local isActive = (i == S.active) and (fullTurnCoverage() or not turnsRunning())
-''',
-        '''  -- faction rows
-  local EMPTY_ROW = { fac="", player="", tintHex="3A2A1A", iconUrl="", variant="", score=-1, locks={}, edits={}, crafts=nil }
-  for i = 1, math.max(nMin, #S.rows) do
-    local row = S.rows[i] or EMPTY_ROW
-    local placeholder = (S.rows[i] == nil)
-    local isActive = (not placeholder) and (i == S.active) and (fullTurnCoverage() or not turnsRunning())
-''',
-        "RTT placeholder row loop",
-    )
-    source = replace_once(
-        source,
-        '''    if S.setup then
-      add('<Button id="act_' .. i .. '" preferredWidth="' .. iconW
-''',
-        '''    if S.setup and not placeholder then
-      add('<Button id="act_' .. i .. '" preferredWidth="' .. iconW
-''',
-        "placeholder portrait guard",
-    )
-    source = replace_once(
-        source,
-        "    if S.setup and variantOptions(row.fac) then\n",
-        "    if S.setup and not placeholder and variantOptions(row.fac) then\n",
-        "placeholder variant guard",
-    )
-    source = replace_once(
-        source,
-        '''    if S.setup then
-      add('<InputField id="nm_' .. i .. '" fontSize="15" textAlignment="MiddleCenter"'
-''',
-        '''    if S.setup and not placeholder then
-      add('<InputField id="nm_' .. i .. '" fontSize="15" textAlignment="MiddleCenter"'
-''',
-        "placeholder name guard",
-    )
-    source = replace_once(
-        source,
-        '''      if S.setup then
-        add('<InputField id="cl_' .. i .. '_' .. r .. '" fontSize="15" textAlignment="MiddleCenter"'
-''',
-        '''      if S.setup and not placeholder then
-        add('<InputField id="cl_' .. i .. '_' .. r .. '" fontSize="15" textAlignment="MiddleCenter"'
-''',
-        "placeholder cell guard",
-    )
-    source = replace_once(
-        source,
-        "    if dominanceFrozen(row) then\n"
-        "      add('<Text preferredWidth=\"28\"' .. NOClick .. '> </Text>')\n",
-        "    if placeholder or dominanceFrozen(row) then\n"
-        "      add('<Text preferredWidth=\"28\"' .. NOClick .. '> </Text>')\n",
-        "placeholder score-button guard",
-    )
-    source = replace_once(
-        source,
-        "    if S.setup and i > 1 then\n",
-        "    if S.setup and i > 1 and not placeholder then\n",
-        "placeholder move guard",
-    )
-    source = replace_once(
-        source,
-        '''    if S.setup then
-      chip("del_" .. i, "uiRowBtn", BTN_SOFT, 26, 11, RUST, "&#215;")
-''',
-        '''    if S.setup and not placeholder then
-      chip("del_" .. i, "uiRowBtn", BTN_SOFT, 26, 11, RUST, "&#215;")
-''',
-        "placeholder delete guard",
     )
     return source
 
@@ -179,18 +96,34 @@ def main() -> None:
         'Global.getVar("RTT_BOXSCORE_MIN")',
         "local EMPTY_ROW =",
         "ww = 31.80 wh = 10.42",
+        "no maxLocks growth",
         "local function dominanceCardSuit",
         "if seatOrder() then dirty = true end",
+        "if pinFirstSeat() then dirty = true end",
         "dominance = row.dom",
     ):
         if needle not in baked:
             raise RuntimeError(f"post-bake validation failed: missing {needle!r}")
 
+    if "--check" in sys.argv:
+        if baked == obj["LuaScript"]:
+            print("CHECK OK: rebaking the current source reproduces the current bake byte-for-byte")
+            return
+        import difflib
+        a, b = obj["LuaScript"].split("\n"), baked.split("\n")
+        diff = [l for l in difflib.unified_diff(a, b, "shipped", "rebaked", n=0, lineterm="")]
+        raise SystemExit("CHECK FAILED: rebake would change %d diff lines:\n%s"
+                         % (len(diff), "\n".join(diff[:40])))
+
     obj["LuaScript"] = baked
     payload = json.dumps(obj, ensure_ascii=True, separators=(",", ":"))
     replacement = f"RTT_BOXSCORE_JSON = [====[{payload}]====]"
     updated = logic[: match.start()] + replacement + logic[match.end() :]
-    LOGIC.write_text(updated, encoding="utf-8", newline="\n")
+    # Path.write_text(newline=...) is 3.10+; this repo is built on macOS system
+    # python 3.9, so open() explicitly. newline="\n" keeps logic.lua LF -- a CRLF
+    # flip here would rewrite every line of the file as a spurious diff.
+    with open(LOGIC, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(updated)
     print(f"rebaked {len(baked.splitlines())} Lua lines into {LOGIC}")
 
 

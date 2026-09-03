@@ -141,6 +141,12 @@ local S = {
                     --   dom={turn,round,suit,score,won,kind,frozen,markerGuid} }
   active    = 1,
   turns     = 0,
+  -- One-shot latch: until a turn is actually recorded the pointer is held on
+  -- the FIRST SEAT. Cleared by the first lock or by any explicit pointer move
+  -- (row select / undo), never re-armed mid-game. Persisted with the rest of S,
+  -- so a pre-first-turn save reloads still pinned and an older save reads nil
+  -- (falsy) and is correctly left alone.
+  pinFirst  = true,
   cols      = 10,   -- round columns always shown: fixed size during the game,
                     -- growing only past round 10 (setup-editable)
   flip      = false,
@@ -950,6 +956,31 @@ local function followTurns()
   return false
 end
 
+-- The FIRST turn of a game belongs to the FIRST SEAT. followTurns() already
+-- says so, but its pin sits behind fullTurnCoverage() -> Turns.enable, and RTT
+-- ships the TTS turn system off, so that path never runs there. This is the
+-- manual-mode equivalent and it runs on every poll while the latch is set,
+-- which also means it self-corrects as rows appear: resort() re-pins S.active
+-- onto whichever row object it was on, and rows are appended in the order the
+-- VP markers become readable, so without this the pointer settles on the
+-- first faction DISCOVERED rather than seat 1.
+-- Target: the first player's colour when it is bound, else row 1 -- in RTT
+-- these are the same row (seat 1 sits at the minimum clockwise-from-+X angle,
+-- so it always sorts to row 1), but the colour lookup keeps it honest if the
+-- geometry ever changes. row.color is nil for the first few polls while the
+-- anchors resolve, hence the row-1 fallback plus the retry-every-poll design.
+local function pinFirstSeat()
+  if not S.pinFirst or #S.rows == 0 then return false end
+  local want = 1
+  local first = Turns.order and Turns.order[1] or nil
+  if first and first ~= "" then
+    local i = rowByColor(first)
+    if i then want = i end
+  end
+  if S.active ~= want then S.active = want; return true end
+  return false
+end
+
 --------------------------------------------------------------------- export --
 local function unpickedList()
   local out = {}
@@ -1464,6 +1495,7 @@ local function poll()
     if refreshDeck() then dirty = true end
     if refreshVariants(byName) then dirty = true end
     if followTurns() then dirty = true end
+    if pinFirstSeat() then dirty = true end
   end
 
   if dirty then
@@ -1476,6 +1508,7 @@ end
 function lockRow(i)
   local row = S.rows[i]
   if row == nil then return end
+  S.pinFirst = false          -- a turn is being recorded: stop holding seat 1
   -- A quick turn pass can beat the poll in either direction, so count every
   -- settled copy here too before the turn number advances.
   local objects = getAllObjects()
@@ -1638,6 +1671,7 @@ function uiUndo()
       table.remove(row.locks)
     end
     S.turns = math.max(0, S.turns - 1)
+    S.pinFirst = false        -- undo positions the pointer deliberately
     if not fullTurnCoverage() then S.active = i end
     rebuildUI()
   end
@@ -1659,6 +1693,7 @@ function uiReset()
   S.rows = {}
   S.active = 1
   S.turns = 0
+  S.pinFirst = true
   S.winner = nil
   S.winnerReason = nil
   S.winnerLock = nil
@@ -1832,6 +1867,7 @@ function uiRowBtn(player, _, id)
     end
   elseif kind == "act" then
     if S.rows[i] then
+      S.pinFirst = false      -- deliberate row pick: do not snap it back
       S.active = i
       rebuildUI()
     end

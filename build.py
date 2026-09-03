@@ -18,9 +18,29 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "out")
-SAVED_OBJECTS = os.path.join(
-    os.path.expanduser("~"), "Documents", "My Games", "Tabletop Simulator",
-    "Saves", "Saved Objects")
+def _saved_objects_dir():
+    """TTS's Saved Objects folder, per platform.
+
+    This used to be the Windows path only, so on macOS --install silently found
+    nothing ("Saved Objects folder not found") and the in-game object stayed
+    stale -- which is why the standalone sheet was still b02.1204 while the repo
+    built b02.1318, and why its COPY panel still looked broken after the fix.
+    First existing candidate wins; the Windows path stays first so behaviour on
+    Windows is unchanged.
+    """
+    home = os.path.expanduser("~")
+    candidates = [
+        os.path.join(home, "Documents", "My Games", "Tabletop Simulator", "Saves", "Saved Objects"),
+        os.path.join(home, "Library", "Tabletop Simulator", "Saves", "Saved Objects"),
+        os.path.join(home, ".local", "share", "Tabletop Simulator", "Saves", "Saved Objects"),
+    ]
+    for c in candidates:
+        if os.path.isdir(c):
+            return c
+    return candidates[0]
+
+
+SAVED_OBJECTS = _saved_objects_dir()
 
 NAME = "Root Box Score"
 
