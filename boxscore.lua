@@ -1405,9 +1405,24 @@ local function poll()
   -- maintainer: "the only memory of which factions are present should be the vp score markers on the
   -- board". A row with no guid was added by hand in EDIT mode and is never pruned; a held or moving
   -- marker still resolves, so only a genuinely destroyed one prunes.
+  -- A faction leaves the table in more ways than "its marker was destroyed". It can be dropped into a
+  -- bag, or removed while a spare copy of the same marker still sits somewhere -- and findMarker
+  -- re-points row.guid at that spare, so the guid keeps resolving and the row never left. Prune on
+  -- whether the FACTION is still present at all: no marker by name, and no supply/board anchor.
+  -- Two consecutive polls are required so a marker in hand or mid-throw never drops a row.
+  local present, presentObj = {}, {}
+  for _, o in ipairs(getAllObjects()) do
+    local n = o.getName() or ""
+    if n ~= "" then present[n] = true; if presentObj[n] == nil then presentObj[n] = o end end
+  end
   for i = #S.rows, 1, -1 do
     local r = S.rows[i]
-    if r.guid ~= nil and r.guid ~= "" and getObjectFromGUID(r.guid) == nil then
+    local guidGone = r.guid ~= nil and r.guid ~= "" and getObjectFromGUID(r.guid) == nil
+    local vpName   = (RTT_VP_SHORT and RTT_VP_SHORT[r.fac] or r.fac) .. " VP"
+    local anchor   = facAnchor(r.fac, presentObj)   -- byName is not in scope this early; build our own
+    local factionGone = (not present[vpName]) and anchor == nil
+    if factionGone then r.gone = (r.gone or 0) + 1 else r.gone = 0 end
+    if guidGone or (r.guid ~= nil and r.guid ~= "" and r.gone >= 2) then
       logev("leave", r.fac)
       table.remove(S.rows, i)
       if S.active > #S.rows then S.active = math.max(1, #S.rows) end

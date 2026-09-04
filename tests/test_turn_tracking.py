@@ -136,7 +136,61 @@ def t_vagabond_anchor_survives_plain_objects(src):
     assert not bad, "Vagabond anchor scan crashed: %s" % bad[0][:150]
 
 
-DIRECT = [("vagabond anchor vs plain objects", t_vagabond_anchor_survives_plain_objects)]
+def t_removing_a_faction_drops_its_row(src):
+    """Taking a faction off the table must drop its box-score row.
+
+    The prune used to key only on the cached marker guid. A faction can leave by other routes -- put in
+    a bag, or removed while a spare same-named marker still sits somewhere, which findMarker then
+    re-points row.guid at, so the guid kept resolving and the row never left.
+    """
+    rt = lupa.LuaRuntime(unpack_returned_tuples=True)
+    rt.execute(open(os.path.join(HERE, "tts_stub.lua"), encoding="utf-8").read())
+    rt.execute("""
+      local _obj = __H.obj
+      __H.obj = function(n,g,p)
+        local o = _obj(n,g,p)
+        o.getColorTint = function() return {r=.5,g=.4,b=.3} end
+        o.getBoundsNormalized = function() return {size={x=1,y=.2,z=1.4}, center={x=0,y=0,z=0}} end
+        o.getVar = function() return nil end
+        o.call = function() return nil end
+        o.isSmoothMoving = function() return false end
+        return o
+      end
+      function REMOVE(guid)
+        for i,o in ipairs(__H.objects) do
+          if o._guid == guid then table.remove(__H.objects, i) return true end
+        end
+        return false
+      end
+    """)
+    rt.execute(src + PROBE)
+    rt.execute(build_setup(["Marquise", "Eyrie"], ["Red", "Yellow"]))
+    rt.globals().onLoad("")
+    rt.globals().__H.flush(20)
+    for _ in range(4):
+        rt.globals().__poll(); rt.globals().__H.flush(3)
+    assert dict(rt.eval("__probe()"))["rows"] == 2, "fixture: expected two rows"
+
+    rt.execute('REMOVE("vp_Marquise") REMOVE("sup_Marquise")')
+    for _ in range(8):
+        rt.globals().__poll(); rt.globals().__H.flush(3)
+    left = dict(rt.eval("__probe()"))["rows"]
+    assert left == 1, "removed faction still has a row (%d rows left)" % left
+
+    # ...and a table nobody touched must keep both rows
+    rt2 = lupa.LuaRuntime(unpack_returned_tuples=True)
+    rt2.execute(open(os.path.join(HERE, "tts_stub.lua"), encoding="utf-8").read())
+    rt2.execute(src + PROBE)
+    rt2.execute(build_setup(["Marquise", "Eyrie"], ["Red", "Yellow"]))
+    rt2.globals().onLoad("")
+    rt2.globals().__H.flush(20)
+    for _ in range(8):
+        rt2.globals().__poll(); rt2.globals().__H.flush(3)
+    assert dict(rt2.eval("__probe()"))["rows"] == 2, "pruned a row that was still on the table"
+
+
+DIRECT = [("vagabond anchor vs plain objects", t_vagabond_anchor_survives_plain_objects),
+          ("removing a faction drops its row", t_removing_a_faction_drops_its_row)]
 
 
 CASES = [
