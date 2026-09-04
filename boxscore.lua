@@ -44,10 +44,10 @@ local PX_PER_UNIT    = 100    -- TTS object-UI render density (measured on a
                               -- slab sized with the documented 250)
 local BASE_SCALE     = 3.85    -- sheet size multiplier at size 1.0
 
--- Luminari is the face Root uses for its faction titles; the sheet follows the game rather than
--- TTS's default UI font. Named in one place so a different face is a one-line change.
-local FONT_NAME = "Luminari"
-local FONT_URL  = "https://cdn.jsdelivr.net/gh/mrdrouf/root-tabletop-tournament@main/assets/fonts/Luminari.ttf"
+-- NO custom font here. TTS's setCustomAssets only accepts image formats -- a .ttf is rejected with
+-- "Load image failed unsupported format: UNKNOWN" and the error repeats on every rebuild. A custom UI
+-- font has to be registered through the Custom UI Assets PANEL, which a script cannot do, so the sheet
+-- stays on TTS's default face.
 
 -- palette: walnut board, parchment sheet, ink, rust and wax-seal gold
 local WALNUT  = "#2B1A0C"
@@ -2102,8 +2102,6 @@ function refreshAssets()
       end
     end
   end
-  -- Root's own title face. TTS can only use a font it can fetch, so it is hosted with the mod's art.
-  table.insert(assets, { name = FONT_NAME, url = FONT_URL })
   self.UI.setCustomAssets(assets)
 end
 
@@ -2745,9 +2743,7 @@ function rebuildUI()
   end
 
   add('</Panel>')
-  -- one Defaults block sets the face for every <Text> in the sheet, so no element carries its own
-  local xml = '<Defaults><Text font="' .. FONT_NAME .. '"/></Defaults>' .. table.concat(x)
-  self.UI.setXml(xml)
+  self.UI.setXml(table.concat(x))
 end
 
 ---------------------------------------------------------------- persistence --
