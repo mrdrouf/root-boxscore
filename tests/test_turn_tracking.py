@@ -86,6 +86,59 @@ def cycle(order, n):
     return [(order[(i + 1) % len(order)], order[i % len(order)]) for i in range(n)]
 
 
+def t_vagabond_anchor_survives_plain_objects(src):
+    """A Vagabond row must not crash on objects that have no custom object.
+
+    facAnchor scans every object for the Vagabond's board art, and markerImage returns nil for
+    anything without a custom object (a die, a bag, a scripting zone) -- and for a custom object
+    carrying none of image/face/diffuse. `nil ~= ""` is TRUE, so the scan fell through to
+    img:find(...) and errored the moment a Vagabond row was created. Reported from the Ultimate
+    mod: "error message printed when the first faction was selected".
+    """
+    rt = lupa.LuaRuntime(unpack_returned_tuples=True)
+    rt.execute(open(os.path.join(HERE, "tts_stub.lua"), encoding="utf-8").read())
+    rt.execute("""
+      local _obj = __H.obj
+      __H.obj = function(n,g,p)
+        local o = _obj(n,g,p)
+        o.getColorTint = function() return {r=.5,g=.4,b=.3} end
+        o.getBoundsNormalized = function() return {size={x=1,y=.2,z=1.4}, center={x=0,y=0,z=0}} end
+        o.getVar = function() return nil end
+        o.call = function() return nil end
+        o.isSmoothMoving = function() return false end
+        return o
+      end
+      ERRS = {}
+      local rp = pcall
+      pcall = function(f, ...) local ok, e = rp(f, ...) if not ok then ERRS[#ERRS+1] = tostring(e) end return ok, e end
+    """)
+    rt.execute(src + PROBE)
+    rt.execute("""
+      local m = __H.obj("Marsh Map","map1",{x=0,y=0,z=0})
+      local sp = {}
+      for _, z in ipairs({-0.05, 0, 0.05}) do
+        for i = 0, 30 do sp[#sp+1] = { position = { x = i*0.03, y = 0, z = z } } end
+      end
+      m._snaps = sp
+      local v = __H.obj("Vagabond VP","vp1",{x=0.9,y=0,z=0})
+      v.held_by_color = nil
+      v.isSmoothMoving = function() return false end
+      local plain = __H.obj("Battle Die","die1",{x=10,y=0,z=10})
+      plain.getCustomObject = function() return nil end     -- a plain object: no custom object
+      __H.seated = { {color="Red", seated=true, steam_name="P0"} }
+    """)
+    rt.globals().onLoad("")
+    rt.globals().__H.flush(20)
+    for _ in range(6):
+        rt.globals().__poll(); rt.globals().__H.flush(3)
+    errs = [str(x) for x in (rt.eval("ERRS") or {}).values()]
+    bad = [e for e in errs if "attempt to index a nil value" in e]
+    assert not bad, "Vagabond anchor scan crashed: %s" % bad[0][:150]
+
+
+DIRECT = [("vagabond anchor vs plain objects", t_vagabond_anchor_survives_plain_objects)]
+
+
 CASES = [
     ("2 players",                      FACTIONS[:2], ["Red", "Yellow"],
      ["Red", "Yellow"], 2, 2),
@@ -122,6 +175,17 @@ def main():
               % (label, name, st["coverage"], st["turns"], st["locks"], "OK" if ok else "FAIL"))
         if not ok:
             failed.append(name)
+    for name, fn in DIRECT:
+        try:
+            fn(src)
+            print("  %-8s %-26s OK" % (label, name))
+        except AssertionError as e:
+            failed.append(name)
+            print("  %-8s %-26s FAIL  %s" % (label, name, e))
+        except Exception as e:                      # a hard Lua error IS the failure
+            failed.append(name)
+            print("  %-8s %-26s FAIL  %s" % (label, name, str(e).split(chr(10))[0][:110]))
+
     if failed and not old:
         raise SystemExit("turn tracking regressed: " + ", ".join(failed))
     print("all turn-tracking cases OK" if not old

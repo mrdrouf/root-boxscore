@@ -619,8 +619,13 @@ local function facAnchor(fac, byName)
   end
   if o == nil and BOARD_ART[fac] ~= nil then
     for _, c in ipairs(getAllObjects()) do
+      -- markerImage returns NIL for anything with no custom object -- a die, a bag, a scripting zone,
+      -- and for a custom object carrying none of image/face/diffuse. `nil ~= ""` is TRUE, so the old
+      -- test fell straight through to img:find and crashed on the first such object on the table.
+      -- Only the Vagabond reaches this branch (it is the one entry in BOARD_ART), which is why it
+      -- showed up as an error the moment a Vagabond row was created.
       local img = markerImage(c)
-      if img ~= "" and img:find(BOARD_ART[fac], 1, true) then
+      if img ~= nil and img ~= "" and img:find(BOARD_ART[fac], 1, true) then
         o = c
         break
       end
