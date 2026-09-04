@@ -980,6 +980,13 @@ end
 -- seat 1). Geometry is authoritative here; colour is not.
 local function pinFirstSeat()
   if not S.pinFirst or #S.rows == 0 then return false end
+  -- MANUAL MODE ONLY. When the TTS turn system is actually driving the sheet,
+  -- followTurns() owns the pointer and has its own first-player pin, and it runs
+  -- immediately before this in the poll -- so without this guard we overwrote it
+  -- every tick and the sheet stopped following turn order altogether (and
+  -- onPlayerTurn's immediate S.active was clobbered 1.2s later too). Regression
+  -- reported by the maintainer; this is the fix.
+  if fullTurnCoverage() then return false end
   if S.active ~= 1 then S.active = 1; return true end
   return false
 end
