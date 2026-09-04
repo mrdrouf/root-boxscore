@@ -754,6 +754,19 @@ local function rttSeatPosMap()
   return nil
 end
 
+-- RTT also publishes each faction's real SEAT COLOUR (Global "RTT_SEAT_COLOR"), written only from its
+-- draft path where the colour is the seat's own. This is authoritative and beats the hand-zone guess
+-- below: Player[c].getHandTransform() returns a position for EVERY colour, seated or not, so the guess
+-- happily binds rows to colours nobody occupies.
+local function rttSeatColorMap()
+  local ok, raw = pcall(function() return Global.getVar("RTT_SEAT_COLOR") end)
+  if ok and type(raw) == "string" and raw ~= "" then
+    local ok2, m = pcall(function() return JSON.decode(raw) end)
+    if ok2 and type(m) == "table" then return m end
+  end
+  return nil
+end
+
 -- These color positions are only for associating a row with TTS's turn/player
 -- color. They are deliberately not an input to box-score row ordering.
 local function colorSeatPositions()
@@ -812,6 +825,18 @@ local function refreshSeats(byName)
     return x.ci < y.ci
   end)
   local usedC, usedF, assigned, changed = {}, {}, {}, false
+  -- AUTHORITATIVE FIRST: any row RTT has named a seat colour for is bound directly, and both its colour
+  -- and its faction are marked used so the greedy geometric pass cannot reassign either.
+  local rttCol = rttSeatColorMap()
+  if rttCol ~= nil then
+    for _, row in ipairs(S.rows) do
+      local c = rttCol[row.fac] or rttCol[RTT_FACTION_ID[row.fac]]
+      if c ~= nil and c ~= "" and not usedC[c] then
+        usedC[c], usedF[row.fac] = true, true
+        assigned[row.fac] = { fac = row.fac, color = c }
+      end
+    end
+  end
   for _, c in ipairs(cand) do
     if not usedC[c.color] and not usedF[c.fac] then
       usedC[c.color], usedF[c.fac] = true, true
