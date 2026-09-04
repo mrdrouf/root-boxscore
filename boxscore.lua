@@ -964,20 +964,23 @@ end
 -- onto whichever row object it was on, and rows are appended in the order the
 -- VP markers become readable, so without this the pointer settles on the
 -- first faction DISCOVERED rather than seat 1.
--- Target: the first player's colour when it is bound, else row 1 -- in RTT
--- these are the same row (seat 1 sits at the minimum clockwise-from-+X angle,
--- so it always sorts to row 1), but the colour lookup keeps it honest if the
--- geometry ever changes. row.color is nil for the first few polls while the
--- anchors resolve, hence the row-1 fallback plus the retry-every-poll design.
+-- Target: ROW 1, and deliberately NOT a colour lookup.
+-- seatOrder() sorts rows clockwise from +X (angle = atan2(-z, x)), and RTT's
+-- seat slots are RTT_POS = {(52,-46),(-52,-46),(52,46),(-52,46)} -> angles
+-- 0.724 / 2.417 / 5.559 / 3.866, so the row order is seat 1, 2, 4, 3 and row 1
+-- is ALWAYS seat 1.
+-- An earlier version of this preferred rowByColor(Turns.order[1]) ("Red" =
+-- RTT's seat-1 colour) and fell back to row 1. That was WRONG and shipped a
+-- regression: row.color is assigned by refreshSeats() from the NEAREST HAND
+-- ZONE, not from RTT's seating, and rttSeatPlayers only recolours SEATED
+-- humans. With empty seats (a solo tester, or fewer humans than seats) "Red"
+-- binds to an arbitrary faction -- in the maintainer's 4-faction solo test the
+-- rows came out Marquise=White, Riverfolk=Red, Alliance=Orange, Duchy=Pink, so
+-- the pin jumped to Riverfolk (row 2, seat 2) instead of Marquise (row 1,
+-- seat 1). Geometry is authoritative here; colour is not.
 local function pinFirstSeat()
   if not S.pinFirst or #S.rows == 0 then return false end
-  local want = 1
-  local first = Turns.order and Turns.order[1] or nil
-  if first and first ~= "" then
-    local i = rowByColor(first)
-    if i then want = i end
-  end
-  if S.active ~= want then S.active = want; return true end
+  if S.active ~= 1 then S.active = 1; return true end
   return false
 end
 
