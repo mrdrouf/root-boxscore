@@ -767,6 +767,20 @@ local function rttSeatColorMap()
   return nil
 end
 
+-- RTT also publishes WHO OWNS each faction (Global "RTT_SEAT_PLAYER", faction -> steam name),
+-- separately from the seat colour. The two are not the same thing: on RTT's manual 4-board path
+-- players keep the colour they joined with while the rows are coloured by SEAT, so matching a row's
+-- colour against seated players finds nobody and the row shows no name. This is authoritative for the
+-- NAME; the colour still drives the turn order.
+local function rttSeatPlayerMap()
+  local ok, raw = pcall(function() return Global.getVar("RTT_SEAT_PLAYER") end)
+  if ok and type(raw) == "string" and raw ~= "" then
+    local ok2, m = pcall(function() return JSON.decode(raw) end)
+    if ok2 and type(m) == "table" then return m end
+  end
+  return nil
+end
+
 -- These color positions are only for associating a row with TTS's turn/player
 -- color. They are deliberately not an input to box-score row ordering.
 local function colorSeatPositions()
@@ -841,6 +855,7 @@ local function refreshSeats(byName)
   -- AUTHORITATIVE FIRST: any row RTT has named a seat colour for is bound directly, and both its colour
   -- and its faction are marked used so the greedy geometric pass cannot reassign either.
   local rttCol = rttSeatColorMap()
+  local rttOwner = rttSeatPlayerMap()
   if rttCol ~= nil then
     for _, row in ipairs(S.rows) do
       local fid = RTT_FACTION_ID and RTT_FACTION_ID[row.fac] or nil
@@ -865,6 +880,8 @@ local function refreshSeats(byName)
     if c then
       if row.color ~= c.color then row.color = c.color; changed = true end
       local name = liveNames[c.color]
+      local owned = rttOwner and (rttOwner[row.fac] or rttOwner[RTT_FACTION_ID[row.fac]])
+      if owned ~= nil and owned ~= "" then name = owned end   -- RTT knows who picked it
       if name ~= nil and (row.player == "" or row.nameAuto) then
         if row.player ~= name then row.player = name; changed = true end
         row.nameAuto = true
