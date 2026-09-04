@@ -95,6 +95,12 @@ CASES = [
      ["Red", "Yellow", "Orange", "Teal"], 4, 4),
     ("4 players, 4 factions",          FACTIONS,     ["Red", "Yellow", "Orange", "Teal"],
      ["Red", "Yellow", "Orange", "Teal"], 4, 4),
+    # The screenshot bug: four boards and a live TTS turn order, but one seat has
+    # emptied out, so one row is bound to a colour nobody occupies. Pre-fix,
+    # fullTurnCoverage() demanded every row's colour be seated, so that single
+    # stale row silently killed tracking for the whole table.
+    ("4 players, one seat emptied",     FACTIONS,     ["Red", "Yellow", "Orange"],
+     ["Red", "Yellow", "Orange", "Teal"], 4, 4),
 ]
 
 

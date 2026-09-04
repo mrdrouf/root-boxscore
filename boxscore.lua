@@ -2196,7 +2196,9 @@ function rebuildUI()
   end
   local maxLocks = 0
   for _, row in ipairs(S.rows) do maxLocks = math.max(maxLocks, #row.locks) end
-  local showR = math.min(math.max((S.cols or 10) + 1, maxLocks + 2), 41)
+  -- Width follows the card track only. Growing it with maxLocks made the
+  -- sheet widen silently as the game went on.
+  local showR = math.min((S.cols or 10) + 1, 41)
   local cellW = showR > 14 and 36 or 44
   local iconW, facW, domW, nameW, liveW = 30, 118, 70, 130, 48
   local btnW = 117
