@@ -1371,6 +1371,23 @@ local function poll()
     if suit then table.insert(domCards, { obj = o, suit = suit }) end
   end
 
+  -- PRUNE rows whose VP marker no longer exists. The sheet's memory must FOLLOW THE TABLE: rows were
+  -- only ever added, never removed, and S is persisted whole (onSave encodes S, onLoad replaces it), so
+  -- loading an old save re-imported every faction it had ever seen and a reset left the sheet still
+  -- believing in markers that were gone -- which is also why VP positions came out in odd slots. The
+  -- maintainer: "the only memory of which factions are present should be the vp score markers on the
+  -- board". A row with no guid was added by hand in EDIT mode and is never pruned; a held or moving
+  -- marker still resolves, so only a genuinely destroyed one prunes.
+  for i = #S.rows, 1, -1 do
+    local r = S.rows[i]
+    if r.guid ~= nil and r.guid ~= "" and getObjectFromGUID(r.guid) == nil then
+      logev("leave", r.fac)
+      table.remove(S.rows, i)
+      if S.active > #S.rows then S.active = math.max(1, #S.rows) end
+      dirty = true
+    end
+  end
+
   for _, row in ipairs(S.rows) do
     -- Count all same-faction copies. The declaration follows its specific
     -- settled card marker; held/moving markers cause no transient change.
