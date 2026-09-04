@@ -794,6 +794,19 @@ end
 -- area after the VP marker moves to the score track. Match that physical anchor
 -- to the nearest color hand zone, greedily one-to-one. Live occupancy is used
 -- only to attach a Steam name; it never controls the row's color/seat.
+-- RTT uses full placement ids while box-score rows use the short VP-marker ids.
+-- Keep the direct row.fac lookup authoritative and bridge only those known names.
+local RTT_FACTION_ID = {
+  Marquise = "Marquise de Cat", Eyrie = "Eyrie Dynasties",
+  Alliance = "Woodland Alliance", Riverfolk = "Riverfolk Company",
+  Lizard = "The Lizard Cult", Duchy = "Underground Duchy",
+  Crows = "Corvid Conspiracy", Rats = "Lord of the Hundreds",
+  Badgers = "Keepers in Iron", Knaves = "Knaves of the Deepwood",
+  Council = "Twilight Council", Diaspora = "Lilypad Diaspora",
+}
+
+-- (moved above refreshSeats: it is a `local`, so any use EARLIER in the file resolves to a nil
+-- GLOBAL and throws 'attempt to index a nil value', killing the whole poll pass.)
 local function refreshSeats(byName)
   local positions, seatCount = colorSeatPositions()
   if seatCount == 0 then return false end
@@ -830,7 +843,8 @@ local function refreshSeats(byName)
   local rttCol = rttSeatColorMap()
   if rttCol ~= nil then
     for _, row in ipairs(S.rows) do
-      local c = rttCol[row.fac] or rttCol[RTT_FACTION_ID[row.fac]]
+      local fid = RTT_FACTION_ID and RTT_FACTION_ID[row.fac] or nil
+      local c = rttCol[row.fac] or (fid ~= nil and rttCol[fid] or nil)
       if c ~= nil and c ~= "" and not usedC[c] then
         usedC[c], usedF[row.fac] = true, true
         assigned[row.fac] = { fac = row.fac, color = c }
@@ -895,16 +909,6 @@ local function fullTurnCoverage()
   return turnsRunning() and #S.rows > 0
 end
 
--- RTT uses full placement ids while box-score rows use the short VP-marker ids.
--- Keep the direct row.fac lookup authoritative and bridge only those known names.
-local RTT_FACTION_ID = {
-  Marquise = "Marquise de Cat", Eyrie = "Eyrie Dynasties",
-  Alliance = "Woodland Alliance", Riverfolk = "Riverfolk Company",
-  Lizard = "The Lizard Cult", Duchy = "Underground Duchy",
-  Crows = "Corvid Conspiracy", Rats = "Lord of the Hundreds",
-  Badgers = "Keepers in Iron", Knaves = "Knaves of the Deepwood",
-  Council = "Twilight Council", Diaspora = "Lilypad Diaspora",
-}
 
 -- Object-name index of each faction's supply anchor, refreshed by the poll (see ~line 1434) just
 -- before seatOrder. Declared HERE, ABOVE factionSeatPosition, so the function captures this upvalue
