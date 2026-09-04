@@ -1629,9 +1629,13 @@ function onPlayerTurn(player, previous)
   -- ONE lock source per mode: with full coverage the event locks; in every
   -- other situation the END TURN button is visible and is the only source.
   if not fullTurnCoverage() then return end
-  -- Only a REAL turn pass counts (previous player seated): toggling the turn
-  -- system bursts through unseated colors and none of those may lock.
-  if previous == nil or previous.seated ~= true then return end
+  -- A pass counts when the colour that just finished HAS A ROW -- i.e. it is one of the seats in play.
+  -- This used to require previous.seated, so an unoccupied seat's turn recorded nothing: in a solo game
+  -- every faction but one is on an empty seat, so ending a turn did nothing at all. Keying on "has a
+  -- row" keeps the original protection (toggling the turn system bursts through colours that have no
+  -- row, and those still lock nothing) while letting a seat's turn count whether or not a human sits
+  -- in it. In a full game every seat is occupied, so nothing changes there.
+  if previous == nil or previous.color == nil then return end
   -- A pass by a seated color with no faction row (an observer) locks nothing.
   local i = rowByColor(previous.color)
   if i then lockRow(i) end

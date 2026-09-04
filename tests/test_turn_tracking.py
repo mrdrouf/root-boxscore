@@ -1,138 +1,125 @@
 """Execute the box score against a stubbed TTS API and assert turn tracking works.
 
-The maintainer plays solo and cannot test turn passing in game, so this runs the real
-boxscore.lua under a Lua interpreter with enough of the TTS API faked to drive it:
+The maintainer plays solo and cannot test turn passing with other people, so this runs the
+real boxscore.lua under a Lua interpreter with enough of the TTS API faked to drive it:
 a score track (3 row-bands x 31 evenly spaced snaps), VP markers parked on printed 0,
-faction supply anchors beside each colour's hand zone, then turn passes.
+faction supply anchors beside each colour's hand zone, then real turn passes.
 
     pip3 install lupa && python3 tests/test_turn_tracking.py
+    python3 tests/test_turn_tracking.py --old      # pre-fix source, for comparison
 
-Regression guarded: before 2026-09-04, fullTurnCoverage() additionally required >= 2
-seated players and every row's colour seated, so a SOLO game silently fell back to
-manual mode -- the turn system recorded nothing and there was no end score. Passing
---old runs the pre-fix source from git for comparison.
+Regressions guarded (all three were live bugs, reported from the table):
+  * solo fell back to manual mode -- fullTurnCoverage() demanded >= 2 seated players;
+  * a single row bound to an UNSEATED colour disabled turn tracking for the whole table,
+    because the gate demanded every row's colour be currently seated;
+  * an unoccupied seat's turn recorded nothing, so solo a full round locked only one score.
 """
 import os, subprocess, sys
 import lupa
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
+FACTIONS = ("Marquise", "Eyrie", "Alliance", "Duchy")
+SEATCOLOR = {"Marquise": "Red", "Eyrie": "Yellow", "Alliance": "Orange", "Duchy": "Teal"}
+HANDPOS = {"Red": (-50, -50), "Yellow": (50, -50), "Orange": (-50, 50), "Teal": (50, 50)}
 
 PROBE = '''
 function __probe()
   local n = 0; for _ in pairs(S.rows) do n = n + 1 end
-  return { turns = S.turns, rows = n,
-           coverage = fullTurnCoverage() and 1 or 0,
-           winner = tostring(S.winner) }
+  return { turns = S.turns, rows = n, coverage = fullTurnCoverage() and 1 or 0 }
 end
 function __row(i)
   local r = S.rows[i]; if r == nil then return nil end
   local n = 0; for _ in pairs(r.locks or {}) do n = n + 1 end
-  return { fac = r.fac, locks = n }
+  return { fac = r.fac, color = tostring(r.color), locks = n }
 end
 function __poll() poll() end
 '''
 
-# Four factions, four seated players -- but one faction's supply sits nearest an UNSEATED
-# colour's hand zone, so that row binds to a colour nobody occupies. This is the multiplayer
-# failure the maintainer reported: colorSeatPositions() hands back a position for EVERY colour,
-# seated or not, and the pre-fix gate then refused coverage for the WHOLE table because one row's
-# colour was not seated. (His save showed exactly this: rows bound to White and Pink.)
-SETUP4 = '''
-local map = __H.obj("Marsh Map","map001",{x=0,y=0,z=0})
-local sp = {}
-for _, z in ipairs({-0.05, 0.0, 0.05}) do
-  for i = 0, 30 do sp[#sp+1] = { position = { x = i*0.03, y = 0, z = z } } end
-end
-map._snaps = sp
-for _, fac in ipairs({"Marquise","Eyrie","Alliance","Duchy"}) do
-  local o = __H.obj(fac.." VP","vp_"..fac,{x=0.90,y=0,z=0.0})
-  o.held_by_color = nil
-  o.isSmoothMoving = function() return false end
-end
-__H.obj("Marquise Supply","sup_M",{x=-50,y=0,z=-50})   -- Red   (seated)
-__H.obj("Eyrie Supply",   "sup_E",{x= 50,y=0,z=-50})   -- Yellow(seated)
-__H.obj("Alliance Supply","sup_A",{x=-50,y=0,z= 50})   -- Orange(seated)
-__H.obj("Duchy Supply",   "sup_D",{x=-70,y=0,z= 40})   -- Pink  (NOT seated)
-__H.seated = { {color="Red",seated=true,steam_name="A"}, {color="Yellow",seated=true,steam_name="B"},
-               {color="Orange",seated=true,steam_name="C"}, {color="Teal",seated=true,steam_name="D"} }
-'''
 
-SETUP = '''
-local map = __H.obj("Marsh Map","map001",{x=0,y=0,z=0})
-local sp = {}
-for _, z in ipairs({-0.05, 0.0, 0.05}) do
-  for i = 0, 30 do sp[#sp+1] = { position = { x = i*0.03, y = 0, z = z } } end
-end
-map._snaps = sp
-for _, fac in ipairs({"Marquise","Eyrie"}) do
-  -- printed 0 sits at the track's MAXIMUM local coordinate
-  local o = __H.obj(fac.." VP","vp_"..fac,{x=0.90,y=0,z=0.0})
-  o.held_by_color = nil
-  o.isSmoothMoving = function() return false end
-end
-__H.obj("Marquise Supply","sup_M",{x=-50,y=0,z=-50})   -- beside Red
-__H.obj("Eyrie Supply","sup_E",{x=50,y=0,z=-50})       -- beside Yellow
-'''
+def build_setup(factions, seated_colors):
+    lines = ['local map = __H.obj("Marsh Map","map001",{x=0,y=0,z=0})',
+             'local sp = {}',
+             'for _, z in ipairs({-0.05, 0.0, 0.05}) do',
+             '  for i = 0, 30 do sp[#sp+1] = { position = { x = i*0.03, y = 0, z = z } } end',
+             'end',
+             'map._snaps = sp']
+    for f in factions:
+        # printed 0 sits at the track's MAXIMUM local coordinate
+        lines.append('local o = __H.obj("%s VP","vp_%s",{x=0.90,y=0,z=0.0})' % (f, f))
+        lines.append('o.held_by_color = nil; o.isSmoothMoving = function() return false end')
+        x, z = HANDPOS[SEATCOLOR[f]]
+        lines.append('__H.obj("%s Supply","sup_%s",{x=%d,y=0,z=%d})' % (f, f, x, z))
+    seats = ", ".join('{color="%s",seated=true,steam_name="P%d"}' % (c, i)
+                      for i, c in enumerate(seated_colors))
+    lines.append('__H.seated = { %s }' % seats)
+    return "\n".join(lines)
 
 
-def run(lua_src, players, setup=None):
+def run(lua_src, factions, seated_colors, order, passes):
     rt = lupa.LuaRuntime(unpack_returned_tuples=True)
     rt.execute(open(os.path.join(HERE, "tts_stub.lua"), encoding="utf-8").read())
     rt.execute(lua_src + PROBE)
     L, H = rt.globals(), rt.globals().__H
-    seats = '{color="Red",seated=true,steam_name="A"}'
-    if players == 2:
-        seats += ', {color="Yellow",seated=true,steam_name="B"}'
-    if setup is not None:
-        rt.execute(setup)
-    else:
-        rt.execute(SETUP + '\n__H.seated = { %s }\n' % seats)
+    rt.execute(build_setup(factions, seated_colors))
     L.onLoad("")
     H.flush(20)
     for _ in range(6):
         L.__poll(); H.flush(3)
-    rt.execute('Turns.enable = true; Turns.order = {"Red","Yellow"}; Turns.turn_color = "Red"')
+    rt.execute('Turns.type = 2; Turns.skip_empty_hands = false; Turns.order = {%s}; '
+               'Turns.turn_color = "%s"; Turns.enable = true'
+               % (", ".join('"%s"' % c for c in order), order[0]))
     for _ in range(4):
         L.__poll(); H.flush(3)
-    for a, b in (("Yellow", "Red"), ("Red", "Yellow"), ("Yellow", "Red")):
-        L.onPlayerTurn(rt.table(color=a, seated=True), rt.table(color=b, seated=True))
+    for nxt, prev in passes:
+        L.onPlayerTurn(rt.table(color=nxt, seated=nxt in seated_colors),
+                       rt.table(color=prev, seated=prev in seated_colors))
         H.flush(3); L.__poll(); H.flush(3)
     st = dict(L.__probe())
-    st["locks"] = sum(dict(L.__row(i))["locks"] for i in (1, 2) if L.__row(i))
+    st["locks"] = sum(dict(L.__row(i))["locks"]
+                      for i in range(1, len(factions) + 1) if L.__row(i))
     return st
 
 
+def cycle(order, n):
+    """n turn passes around `order`, as (next, previous) pairs."""
+    return [(order[(i + 1) % len(order)], order[i % len(order)]) for i in range(n)]
+
+
+CASES = [
+    ("2 players",                      FACTIONS[:2], ["Red", "Yellow"],
+     ["Red", "Yellow"], 2, 2),
+    ("solo, 2 factions",               FACTIONS[:2], ["Red"],
+     ["Red", "Yellow"], 2, 2),
+    ("solo, full 4-seat round",        FACTIONS,     ["Red"],
+     ["Red", "Yellow", "Orange", "Teal"], 4, 4),
+    ("4 players, 4 factions",          FACTIONS,     ["Red", "Yellow", "Orange", "Teal"],
+     ["Red", "Yellow", "Orange", "Teal"], 4, 4),
+]
+
+
 def main():
-    if "--old" in sys.argv:
+    old = "--old" in sys.argv
+    if old:
         src = subprocess.run(["git", "-C", REPO, "show", "0da0200:boxscore.lua"],
                              capture_output=True, text=True).stdout
-        label = "PRE-FIX (0da0200)"
+        label = "PRE-FIX"
     else:
         src = open(os.path.join(REPO, "boxscore.lua"), encoding="utf-8").read()
-        label = "current boxscore.lua"
+        label = "current"
 
-    failed = False
-    for players in (2, 1):
-        st = run(src, players)
-        ok = st["coverage"] == 1 and st["turns"] == 3 and st["locks"] == 3
-        print("%-22s players=%d  coverage=%d turns=%d locks=%d  %s"
-              % (label, players, st["coverage"], st["turns"], st["locks"],
-                 "OK" if ok else "FAIL"))
-        if not ok and "--old" not in sys.argv:
-            failed = True
-
-    # 4 players, one faction bound to an unseated colour
-    st = run(src, 4, setup=SETUP4)
-    ok = st["coverage"] == 1 and st["turns"] == 3
-    print("%-22s players=4 (one row on an unseated colour)  coverage=%d turns=%d  %s"
-          % (label, st["coverage"], st["turns"], "OK" if ok else "FAIL"))
-    if not ok and "--old" not in sys.argv:
-        failed = True
-    if failed:
-        raise SystemExit("turn tracking regressed: three passes must record three locks "
-                         "at BOTH player counts")
-    print("turn tracking OK" if "--old" not in sys.argv else "(pre-fix run, failures expected solo)")
+    failed = []
+    for name, facs, seated, order, npass, want in CASES:
+        st = run(src, facs, seated, order, cycle(order, npass))
+        ok = st["coverage"] == 1 and st["turns"] == npass and st["locks"] == want
+        print("  %-8s %-26s coverage=%d turns=%d locks=%d  %s"
+              % (label, name, st["coverage"], st["turns"], st["locks"], "OK" if ok else "FAIL"))
+        if not ok:
+            failed.append(name)
+    if failed and not old:
+        raise SystemExit("turn tracking regressed: " + ", ".join(failed))
+    print("all turn-tracking cases OK" if not old
+          else "(pre-fix run: failures above are the bugs this suite guards)")
 
 
 if __name__ == "__main__":
