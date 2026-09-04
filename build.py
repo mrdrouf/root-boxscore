@@ -83,6 +83,10 @@ def block(lua, webhook=""):
             "records a per-round box score, following the TTS turn system. "
             "The INFO button on the sheet is the manual."),
         "GMNotes": webhook,
+        # Orientation under TTS's Alt zoom. It is INDEPENDENT of the table rotation above, so the sheet
+        # can keep rotY 270 (which is what makes it readable lying flat from the player's seat) while
+        # the zoom view is corrected separately -- without this it presents 180 out, i.e. upside down.
+        "AltLookAngle": {"x": 0.0, "y": 180.0, "z": 0.0},
         "ColorDiffuse": PARCHMENT,
         "Locked": False,
         "Grid": True,
