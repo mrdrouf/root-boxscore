@@ -850,22 +850,24 @@ end
 -- a seated color. Solo and hotseat games (one player running several
 -- factions) fall back to the manual END TURN button.
 local function fullTurnCoverage()
-  if not turnsRunning() or #S.rows == 0 then return false end
-  -- The turn system can drive the sheet only when >= 2 real seats exist AND
-  -- every faction row's player is seated RIGHT NOW. Stale colors (saved
-  -- games, disconnects) collapse to manual mode so END TURN reappears.
-  local seatedSet, seats = {}, 0
-  for _, p in ipairs(Player.getPlayers()) do
-    if p.seated and p.color ~= "Black" and p.color ~= "Grey" then
-      seatedSet[p.color] = true
-      seats = seats + 1
-    end
-  end
-  if seats < 2 then return false end
-  for _, r in ipairs(S.rows) do
-    if r.color == nil or not seatedSet[r.color] then return false end
-  end
-  return true
+  -- ONE rule, identical at every player count: if the TTS turn system is running
+  -- and the sheet has rows, the turn system drives the sheet. Otherwise the
+  -- manual END TURN button does.
+  --
+  -- This used to additionally require >= 2 seated players AND every row's colour
+  -- to be seated right now. Both made the behaviour depend on WHO happened to be
+  -- sitting down: a solo game (and any hotseat game where one player runs several
+  -- factions) silently fell back to manual mode, so the turn system could not be
+  -- tested or used at all, and a single disconnect mid-game flipped a running
+  -- table into a different mode. The maintainer asked for the same logic to work
+  -- the same way regardless of player count, so those two conditions are gone.
+  --
+  -- Nothing downstream needs them: followTurns() looks the turn colour up with
+  -- rowByColor and simply does nothing when there is no such row, and
+  -- onPlayerTurn still refuses to lock unless the PREVIOUS colour was really
+  -- seated -- so toggling the turn system, or TTS stepping through empty
+  -- colours, still records nothing.
+  return turnsRunning() and #S.rows > 0
 end
 
 -- RTT uses full placement ids while box-score rows use the short VP-marker ids.
