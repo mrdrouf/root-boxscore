@@ -2720,7 +2720,7 @@ function rebuildUI()
     add('<VerticalLayout padding="12 12 10 8" spacing="5" childForceExpandHeight="false">')
     add('<Text fontSize="12" fontStyle="Bold" color="' .. PARCH .. '" preferredHeight="16"'
       .. ' alignment="MiddleLeft"' .. NOClick
-      .. '>JSON, ' .. #copyFieldText() .. ' chars &#183; A/B/C/D below are a one-off test &#8211; which of the four show text?</Text>')
+      .. '>JSON, ' .. #copyFieldText() .. ' chars &#183; A-D are a test: for each, say TEXT, or &#60;&#60;EMPTY&#62;&#62;, or NOTHING</Text>')
     -- DOUBLE quotes, like every other element in this file -- this was the only one in 2900 lines
     -- built with single quotes, which TTS's XmlUI does not accept, so not even id="cpyfld" parsed
     -- and every setAttribute/setValue on it was a silent no-op.
@@ -2743,24 +2743,41 @@ function rebuildUI()
     -- thread) and which the docs also list.
     add('<InputField id="cpyfld" fontSize="10" preferredHeight="104" lineType="MultiLineNewLine"'
       .. ' colors="#F1E5C8|#FFFFFF|#FFFFFF|#00000000" textColor="' .. INKTXT .. '"'
+      .. ' placeholder="&#60;&#60;EMPTY&#62;&#62;"'
       .. ' text="' .. esc(copyFieldText()) .. '"/>')
 
-    -- ROUND 2 of the probes, now on the attribute path, isolating one variable each. Entities are
-    -- documented as decoding correctly in attributes (unlike inner text), so B is the real question:
-    -- a JSON payload is nothing but escaped quotes.
-    local function probe(id, label, body)
-      add('<HorizontalLayout preferredHeight="22" spacing="4">')
-      add('<Text fontSize="10" color="' .. PARCH .. '" preferredWidth="150" alignment="MiddleRight"'
+    -- ROUND 3. Round 2 came back all blank INCLUDING the plain-text control, which cannot be right:
+    -- the player-name and webhook fields in this very file display through the same text attribute.
+    -- So the difference is in the OTHER attributes, or the text is present but not visible. Two
+    -- changes make this readable:
+    --   * every probe sets placeholder="&#60;&#60;EMPTY&#62;&#62;", so a blank box now MEANS blank.
+    --     If a probe shows neither the placeholder nor its text, the text is there but invisible.
+    --   * A and B are byte-for-byte clones of the WORKING name field's attributes (IF_COLORS, RUST,
+    --     and its two handlers), differing only in the string. If A shows and my own styling does
+    --     not, the fault is an attribute of mine, not the mechanism.
+    local function probeLike(id, label, body)     -- exactly the working name field's attribute set
+      add('<HorizontalLayout preferredHeight="24" spacing="4">')
+      add('<Text fontSize="11" color="' .. PARCH .. '" preferredWidth="150" alignment="MiddleRight"'
         .. NOClick .. '>' .. label .. '</Text>')
-      add('<InputField id="' .. id .. '" fontSize="10" flexibleWidth="1"'
-        .. ' colors="#F1E5C8|#FFFFFF|#FFFFFF|#00000000" textColor="' .. INKTXT .. '"'
+      add('<InputField id="' .. id .. '" fontSize="15" textAlignment="MiddleCenter"'
+        .. ' flexibleWidth="1" ' .. IF_COLORS .. ' textColor="' .. RUST
+        .. '" text="' .. body .. '" onValueChanged="uiLiveEdit" onEndEdit="uiNameEdit"/>')
+      add('</HorizontalLayout>')
+    end
+    local function probeMine(id, label, body)     -- my styling, but with a visible placeholder
+      add('<HorizontalLayout preferredHeight="24" spacing="4">')
+      add('<Text fontSize="11" color="' .. PARCH .. '" preferredWidth="150" alignment="MiddleRight"'
+        .. NOClick .. '>' .. label .. '</Text>')
+      add('<InputField id="' .. id .. '" fontSize="15" flexibleWidth="1"'
+        .. ' placeholder="&#60;&#60;EMPTY&#62;&#62;"'
+        .. ' colors="#F1E5C8|#FFFFFF|#FFFFFF|#00000000" textColor="#B00000"'
         .. ' text="' .. body .. '"/>')
       add('</HorizontalLayout>')
     end
-    probe("dbgA", "A attr, plain",      "PLAIN-ATTR-CONTROL")
-    probe("dbgB", "B attr, one quote",  "a&#34;b")
-    probe("dbgC", "C attr, json",       "{&#34;a&#34;:1}")
-    probe("dbgD", "D attr, json+space", " {&#34;a&#34;:1}")
+    probeLike("dbgA", "A like nm_, plain", "CONTROL-A")
+    probeLike("dbgB", "B like nm_, json",  "{&#34;a&#34;:1}")
+    probeMine("dbgC", "C mine, plain",     "CONTROL-C")
+    probeMine("dbgD", "D mine, json",      "{&#34;a&#34;:1}")
     fillCopyField()
     add('<HorizontalLayout preferredHeight="26" spacing="6" childForceExpandWidth="false">')
     add('<Text flexibleWidth="1"' .. NOClick .. '> </Text>')
