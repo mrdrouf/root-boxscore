@@ -2642,14 +2642,16 @@ function rebuildUI()
   add('<Button fontSize="12" fontStyle="Bold" preferredWidth="66" ' .. BTN_SOFT .. ' text="EXPORT" onClick="uiExport"/>')
   add('<Button fontSize="12" fontStyle="Bold" preferredWidth="56" ' .. (S.setup and BTN_GOLD or BTN_SOFT)
     .. ' text="' .. (S.setup and "DONE" or "EDIT") .. '" onClick="uiSetup"/>')
-  -- the export result sits immediately LEFT of INFO and in bold: it is a reaction to pressing the
-  -- button, so it belongs beside the buttons, not lost in the credit line on the far right
-  if S.lastExport ~= "" then
-    add('<Text fontSize="12" fontStyle="Bold" color="' .. RUST .. '" alignment="MiddleRight"'
-      .. ' flexibleWidth="1"' .. NOClick .. '>' .. S.lastExport .. '&#160;&#160;</Text>')
-  end
   add('<Button fontSize="12" fontStyle="Bold" preferredWidth="52" '
     .. ((S.overlay == "info") and BTN_GOLD or BTN_SOFT) .. ' text="INFO" onClick="uiInfo"/>')
+  -- The export result goes to the RIGHT of INFO, in bold. It sat on the left for one build and that
+  -- shoved every button along when it appeared: this row is childForceExpandWidth="false", so a
+  -- flexible element added BEFORE the buttons takes its width out of them. After INFO there is
+  -- nothing but the credit to share with, so the buttons never move.
+  if S.lastExport ~= "" then
+    add('<Text fontSize="12" fontStyle="Bold" color="' .. RUST .. '" alignment="MiddleLeft"'
+      .. ' flexibleWidth="1"' .. NOClick .. '>&#160;&#160;' .. S.lastExport .. '</Text>')
+  end
   local right = "made by MrDrouf&#160;&#160;&#183;&#160;&#160;" .. BUILD
   add('<Text fontSize="12" fontStyle="Italic" color="' .. RUST .. '" alignment="MiddleRight" flexibleWidth="1"' .. NOClick .. '>'
     .. right .. '</Text>')
