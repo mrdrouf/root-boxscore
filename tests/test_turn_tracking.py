@@ -193,145 +193,109 @@ DIRECT = [("vagabond anchor vs plain objects", t_vagabond_anchor_survives_plain_
           ("removing a faction drops its row", t_removing_a_faction_drops_its_row)]
 
 
-def t_copy_emits_the_tournament_schema(src):
-    """COPY must produce the tournament site's JSON, and produce it at all.
-
-    Two separate bugs. The box came up EMPTY: the JSON was baked into an XML attribute, and a whole
-    internal record is long enough that one stray character or the sheer length makes TTS drop the
-    panel without a word. And the payload was the mod's own record, not the schema the site ingests
-    (root_boxscore/EXPORT_SCHEMA.md). The field is now emitted empty and filled by fillCopyField,
-    with the compact tournament payload.
-    """
-    import json as _json
+def _export_fixture(src, extra=""):
     rt = lupa.LuaRuntime(unpack_returned_tuples=True)
     rt.execute(open(os.path.join(HERE, "tts_stub.lua"), encoding="utf-8").read())
-    # S is a local of boxscore.lua, so the fixture is compiled INTO the same chunk to reach it
     rt.execute(src + """
-function __export_fixture()
+function __fixture()
   S.meta.map = "Autumn"; S.meta.deck = "Squires and Disciples"
   S.unpicked = { Badgers = true }
   S.rows = {
-    { fac = "Alliance", player = "mrdrouf", variant = "", locks = {3, 8, 14} },
-    { fac = "Rats", player = "mrmirz", variant = "",
+    { fac = "Alliance", player = "mrdrouf", variant = "", locks = {3, 8, 14}, edits = {}, score = 14 },
+    { fac = "Rats", player = "mrmirz", variant = "", edits = {}, score = 8,
       locks = {1, 4, 8}, dom = { suit = "bird", round = 2, kind = "brazen_demagogue" } },
-    { fac = "Vagabond", player = "bw", variant = "Tinker", locks = {1, 4} },
-    { fac = "Eyrie", player = "bob", variant = "Commander", locks = {3, 8, 14, 19} },
+    { fac = "Vagabond", player = "bw", variant = "Tinker", locks = {1, 4}, edits = {}, score = 4 },
+    { fac = "Eyrie", player = "bob", variant = "Commander", locks = {3, 8, 14, 19}, edits = {}, score = 19 },
   }
-  return JSON.encode(tournamentPayload())
+""" + extra + """
+  return exportJson()
 end
 """)
-    p = _json.loads(rt.globals().__export_fixture())
+    return rt
 
-    assert p["board_map"] == "autumn", p.get("board_map")
-    assert p["deck"] == "squires-disciples", p.get("deck")
-    assert p["undrafted_faction"] == "keepers-in-iron", p.get("undrafted_faction")
+
+def t_export_emits_the_full_schema(src):
+    """EXPORT produces the site's schema with EVERY field present.
+
+    The maintainer asked for all the fields from the developer's example, so the shape is constant:
+    what this object cannot know comes out as null, not as a missing key -- absent and unknown are
+    different things to whoever ingests it. Only Lua-side placeholders make that possible, since
+    JSON.encode drops a nil and writes {} for an empty table.
+    """
+    import json as _json
+    p = _json.loads(_export_fixture(src).globals().__fixture())
+
+    assert p["board_map"] == "autumn" and p["deck"] == "squires-disciples"
+    assert p["undrafted_faction"] == "keepers-in-iron"
+    assert p["undrafted_vagabond"] is None, "unknown must be null, not missing"
+    assert p["undrafted_captains"] == [], "an empty list must be [], not {}"
 
     got = {e["faction"]: e for e in p["participants"]}
-    assert set(got) == {"woodland-alliance", "lord-of-the-hundreds", "vagabond",
-                        "eyrie-dynasties"}, sorted(got)
+    assert set(got) == {"woodland-alliance", "lord-of-the-hundreds", "vagabond", "eyrie-dynasties"}
+
+    FIELDS = {"player", "coalition", "faction", "dominance", "vagabond", "captains",
+              "discarded_captain", "starting_leader", "brazen_demagogue", "tournament_score",
+              "turn_order", "turns"}
+    for fac, e in got.items():
+        assert set(e) == FIELDS, "%s has %s" % (fac, sorted(set(e) ^ FIELDS))
+        assert e["captains"] == [], "captains must be [] for %s" % fac
+        assert e["coalition"] is None and e["tournament_score"] is None
 
     a = got["woodland-alliance"]
     assert a["player"] == "mrdrouf" and a["turn_order"] == 1
-    assert a["turns"] == [{"turn": 1, "score": 3}, {"turn": 2, "score": 8},
-                          {"turn": 3, "score": 14}], a["turns"]
+    assert a["turns"] == [{"turn": 1, "score": 3}, {"turn": 2, "score": 8}, {"turn": 3, "score": 14}]
+    assert a["starting_leader"] is None and a["vagabond"] is None
 
     r = got["lord-of-the-hundreds"]
-    assert r["dominance"] == "Bird", r.get("dominance")
-    assert r["brazen_demagogue"] is True
+    assert r["dominance"] == "Bird" and r["brazen_demagogue"] is True
     assert r["turns"][0] == {"turn": 1, "score": 1}, "turn 1 predates the dominance"
-    assert r["turns"][1].get("dominance") is True, "turn 2 onward carries the dominance flag"
+    assert r["turns"][1].get("dominance") is True
 
-    assert got["vagabond"]["vagabond"] == "tinker", got["vagabond"].get("vagabond")
+    assert got["vagabond"]["vagabond"] == "tinker"
+    assert got["vagabond"]["starting_leader"] is None, "only the Eyrie has a leader"
     assert got["eyrie-dynasties"]["starting_leader"] == "Commander"
-    assert "starting_leader" not in got["vagabond"], "only the Eyrie has a leader"
-
-    for e in p["participants"]:          # unsourced fields are omitted, never guessed
-        for absent in ("coalition", "captains", "discarded_captain", "tournament_score"):
-            assert absent not in e, "%s was invented for %s" % (absent, e["faction"])
 
 
-def t_copy_panel_has_no_dead_inputfield(src):
-    """No InputField in the copy panel: measured over five rounds, one cannot be filled from script.
-
-    In the maintainer's game an InputField renders its placeholder but never text set from script --
-    not via the text attribute, not as inner text, not via setAttribute or setValue, with or without
-    an id, in any container. The final control was a byte-for-byte clone of the panel's own field
-    carrying "HELLO" and showed neither the word nor its own placeholder. The notebook is the
-    mechanism; a permanently empty box is worse than no box.
-    """
-    # the PANEL branch, not uiCopy() at the top of the file which mentions the same condition
-    i = src.index('elseif S.overlay == "copy" then')
-    panel = src[i:src.index('elseif S.overlay ==', i + 10)]
-    assert "<InputField" not in panel, "the dead InputField is back in the copy panel"
-    assert "BoxScore JSON" in panel, "the panel no longer tells the user where the JSON is"
-
-
-def t_no_setattribute_on_the_copy_field(src):
-    """setAttribute and setValue must never touch this field.
-
-    TTS nolt #1317: setAttribute(id,"text",v) CLEARS an InputField when v is a JSON object -- "{}" is
-    enough, and getAttribute still returns the value, so only the display blanks. nolt #2151:
-    setValue updates the value but never the display. Those calls were not a fallback, they were
-    wiping the inner text that setXml had correctly placed.
-    """
-    assert 'setAttribute("cpyfld"' not in src, "setAttribute is back on the copy field -- it clears it"
-    assert 'setValue("cpyfld"' not in src, "setValue is back on the copy field -- it does nothing"
-
-
-def t_payload_is_pure_ascii(src):
-    """The payload must be ASCII AND free of &, < and > -- it goes in as XML element content."""
-    rt = lupa.LuaRuntime(unpack_returned_tuples=True)
-    rt.execute(open(os.path.join(HERE, "tts_stub.lua"), encoding="utf-8").read())
-    rt.execute(src + """
-function __ascii_fixture()
-  S.meta.map = "Marsh"
-  S.rows = { { fac = "Marquise", player = "A&B<C>D KRT\\u{2122}McArthur", variant = "", locks = {1} } }
-  return copyFieldText()
-end
-""")
-    got = rt.globals().__ascii_fixture()
-    assert all(ord(c) < 128 for c in got), "non-ASCII survived: %r" % [c for c in got if ord(c) > 127]
-    for bad in ("&", "<", ">"):
-        assert bad not in got, "%r survived into XML element content: %s" % (bad, got)
-    assert "\\u2122" in got.replace("\\\\", "\\"), "the TM was dropped instead of escaped: %s" % got
+def t_export_is_one_record_to_one_tab(src):
+    """One JSON, one notebook tab. EXPORT used to write its own record to a second tab."""
+    # this case is about the notebook, not the sheet; the UI rebuild wants a fuller row shape
+    rt = _export_fixture(src, "  rebuildUI = function() end  uiExport(nil)")
+    rt.execute("__fixture()")
+    tabs = rt.eval("Notes.getNotebookTabs()")
+    titles = [tabs[i].title for i in range(1, len(tabs) + 1)]
+    assert titles == ["BoxScore"], "expected exactly one tab, got %s" % titles
     import json as _json
-    assert _json.loads(got)["participants"][0]["player"] == "A&B<C>D KRT\u2122McArthur", \
-        "the \\u escapes must decode back to the real characters"
+    body = _json.loads(tabs[1].body)
+    assert body["board_map"] == "autumn", "the tab holds the internal record, not the site schema"
+    assert "participants" in body
 
 
-def t_copy_also_reaches_the_notebook(src):
-    """Whatever the InputField does, the JSON must be reachable by a route known to work.
+def t_no_copy_button_or_overlay(src):
+    """COPY is gone: one export path, one button.
 
-    uiExport has always written its record to a notebook tab and that has never been reported broken,
-    so COPY writes the tournament payload the same way. The box coming up empty then costs the
-    maintainer nothing.
+    An InputField here cannot be filled from script -- measured over five rounds, in every container,
+    by attribute, inner text, setAttribute and setValue -- so the panel it opened was a dead box.
     """
-    rt = lupa.LuaRuntime(unpack_returned_tuples=True)
-    rt.execute(open(os.path.join(HERE, "tts_stub.lua"), encoding="utf-8").read())
-    rt.execute(src + """
-function __notebook_fixture()
-  S.meta.map = "Autumn"
-  S.rows = { { fac = "Marquise", player = "p", variant = "", locks = {2, 5} } }
-  fillCopyField()
-  for _, t in ipairs(Notes.getNotebookTabs()) do
-    if t.title == "BoxScore JSON" then return t.body end
-  end
-  return ""
-end
-""")
-    body = rt.globals().__notebook_fixture()
-    assert body and body != "", "COPY wrote nothing to the notebook"
+    assert 'onClick="uiCopy"' not in src, "the COPY button is back"
+    assert "function uiCopy" not in src, "uiCopy is back"
+    assert 'S.overlay == "copy"' not in src, "the copy overlay is back"
+    for dead in ("copyFieldText", "fillCopyField", "wrapJson", "escInner", "copyFieldXmlEscape"):
+        assert dead not in src, "%s survived the cleanup" % dead
+
+
+def t_export_is_pure_ascii(src):
+    """The payload must be ASCII: a real export carried a raw TM in a player name."""
+    rt = _export_fixture(src, '  S.rows[1].player = "KRT\\u{2122}McArthur"')
+    got = rt.globals().__fixture()
+    assert all(ord(c) < 128 for c in got), "non-ASCII survived"
     import json as _json
-    p = _json.loads(body)
-    assert p["board_map"] == "autumn"
-    assert p["participants"][0]["faction"] == "marquise-de-cat"
+    assert _json.loads(got)["participants"][0]["player"] == "KRT\u2122McArthur"
 
 
-DIRECT += [("copy emits the tournament schema", t_copy_emits_the_tournament_schema),
-           ("copy panel has no dead field",     t_copy_panel_has_no_dead_inputfield),
-           ("no setAttribute on copy field",    t_no_setattribute_on_the_copy_field),
-           ("payload is pure ascii",            t_payload_is_pure_ascii),
-           ("copy also reaches the notebook",   t_copy_also_reaches_the_notebook)]
+DIRECT += [("export emits the full schema",   t_export_emits_the_full_schema),
+           ("one record, one notebook tab",    t_export_is_one_record_to_one_tab),
+           ("no COPY button or overlay",       t_no_copy_button_or_overlay),
+           ("export payload is pure ascii",    t_export_is_pure_ascii)]
 
 
 CASES = [

@@ -99,20 +99,21 @@ attached on the site instead.
 
 ## What the box score fills, and what it does not
 
-**Implemented.** `tournamentPayload()` in boxscore.lua builds exactly this, and COPY shows it.
-`exportPayload()` still builds the mod's own internal record for the Discord/notebook export -- the
-two are deliberately separate.
+**Implemented.** `tournamentPayload()` builds this and `exportJson()` serialises it; EXPORT writes it
+to the notebook tab **"BoxScore"** and, if a webhook is set, posts it to Discord. One record either
+way -- there is no second copy and no second tab.
 
-Mapping, checked against the source. An earlier draft of this table called `board_map`, `deck` and
-`starting_leader` gaps; they are not -- the object already detects all three.
+EVERY field in the example is emitted. What the object cannot know comes out as `null` (or `[]`),
+never as a missing key: absent and unknown are not the same thing to whoever ingests this. Lua needs
+placeholders for that, since `JSON.encode` drops a nil and writes `{}` for an empty table.
 
 | schema field | source | note |
 |---|---|---|
 | `board_map` | `S.meta.map` | auto-detected from the map's image URL (`MAP_NAMES`), slugified |
 | `deck` | `S.meta.deck` | auto-detected from the card-back art (`DECK_BACKS`); "and" is dropped, so "Squires and Disciples" -> `squires-disciples` |
-| `faction` | `row.fac` via `FACTION_SLUG` | the roster's short names map to the site's full slugs (`Rats` -> `lord-of-the-hundreds`) |
-| `player` | `row.player` | omitted when blank |
-| `turn_order` | row index | rows are already ordered by physical seat |
+| `faction` | `row.fac` via `FACTION_SLUG` | the roster's short names map to the site's slugs (`Rats` -> `lord-of-the-hundreds`) |
+| `player` | `row.player` | `null` when blank |
+| `turn_order` | row index | rows are ordered by physical seat |
 | `turns[]` | `row.locks` | one entry per locked round; `-1` (no score yet) is skipped |
 | `turns[].dominance` | `row.dom.round` | set from the round the dominance was taken onward |
 | `dominance` | `row.dom.suit` | capitalised for the site: `bird` -> `Bird` |
@@ -120,8 +121,21 @@ Mapping, checked against the source. An earlier draft of this table called `boar
 | `vagabond` | `row.variant` | the variant auto-detect resolves the character for Vagabond and Knaves |
 | `starting_leader` | `row.variant` | the SAME field: for the Eyrie it holds a leader, not a character |
 | `undrafted_faction` / `undrafted_vagabond` | `S.unpicked`, `S.unpickedVar` | first unpicked faction |
-| `coalition` | **not tracked** | omitted |
-| `captains` / `discarded_captain` | **not tracked** | omitted |
-| `tournament_score` | **not tracked** | a tournament outcome, not a game fact -- omitted |
+| `coalition` | not tracked | always `null` |
+| `captains` / `discarded_captain` | not tracked | always `[]` / `null` |
+| `tournament_score` | not tracked | an outcome, not a game fact; always `null` |
 
-Nothing unsourced is guessed: those four keys are simply absent, which the schema allows.
+Non-ASCII is `\uXXXX`-escaped so the payload survives being pasted through Discord, a web form or a
+terminal. It is the same JSON either way.
+
+## Why the notebook, and not a text box on the sheet
+
+TTS has no clipboard API. An InputField on this object renders its placeholder but never text set
+from script -- measured over five rounds in the maintainer's game, in every container, via the `text`
+attribute, via inner text, via `setAttribute` and via `setValue`, with and without an id. A control
+field cloned byte-for-byte from the working one, carrying the word `HELLO`, showed neither the word
+nor its own placeholder.
+
+The notebook body is a native text area that never touches the XML layer. It worked first time and
+every time since, so it is the mechanism rather than a fallback: **Notebook -> "BoxScore" -> Ctrl+A,
+Ctrl+C.**

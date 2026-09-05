@@ -50,6 +50,9 @@ local BASE_SCALE     = 3.85    -- sheet size multiplier at size 1.0
 -- stays on TTS's default face.
 
 -- palette: walnut board, parchment sheet, ink, rust and wax-seal gold
+-- the single notebook tab the export writes; declared here so uiExport can see it
+local NOTEBOOK_TAB = "BoxScore"
+
 local WALNUT  = "#2B1A0C"
 local PARCH   = "#F1E5C8"
 local PARCH2  = "#E7D8B4"
@@ -1061,10 +1064,10 @@ local function unpickedList()
   return out
 end
 
--- The tournament site's own schema (root_boxscore/EXPORT_SCHEMA.md), which is NOT the internal
--- record exportPayload builds. Almost every field is optional, so anything this object does not
--- track is simply left out rather than guessed: coalition, captains, discarded_captain and
--- tournament_score have no source here.
+-- The tournament site's schema (root_boxscore/EXPORT_SCHEMA.md). Every field in the developer's
+-- example is emitted, so the shape is always the same: the ones this object cannot know come out as
+-- null rather than being dropped, because a missing key and an unknown value are not the same thing
+-- to whoever ingests this. exportPayload below is a different, internal record and is left alone.
 local FACTION_SLUG = {
   Marquise = "marquise-de-cat",   Eyrie    = "eyrie-dynasties",  Alliance = "woodland-alliance",
   Vagabond = "vagabond",          Riverfolk= "riverfolk-company", Lizard  = "lizard-cult",
@@ -1073,6 +1076,10 @@ local FACTION_SLUG = {
   Council  = "twilight-council",  Diaspora = "lilypad-diaspora",
 }
 
+-- JSON.encode drops a nil and writes {} for an empty table, so null and [] need placeholders that
+-- are swapped back once the string exists.
+local JNULL, JLIST = "@@null@@", "@@list@@"
+
 local function slug(v)
   v = tostring(v or ""):lower()
   v = v:gsub("&", " "):gsub("%f[%w]and%f[%W]", " ")   -- "Squires and Disciples" -> squires-disciples
@@ -1080,10 +1087,42 @@ local function slug(v)
   return v
 end
 
-function tournamentPayload()   -- global: the tests drive it directly
-  local p = {}
-  if S.meta.map  ~= "" then p.board_map = slug(S.meta.map) end
-  if S.meta.deck ~= "" then p.deck      = slug(S.meta.deck) end
+-- \uXXXX-escape anything outside ASCII so the payload survives being pasted through Discord, a web
+-- form or a terminal. Still the same JSON: the observed export carried a raw U+2122 in a player name.
+function asciiOnly(str)
+  local out, i, n = {}, 1, #str
+  while i <= n do
+    local b = str:byte(i)
+    if b < 128 then out[#out + 1] = str:sub(i, i); i = i + 1
+    else
+      local len, cp
+      if     b >= 240 then len, cp = 4, b - 240
+      elseif b >= 224 then len, cp = 3, b - 224
+      elseif b >= 192 then len, cp = 2, b - 192
+      else                 len, cp = 1, b end
+      for k = 1, len - 1 do cp = cp * 64 + ((str:byte(i + k) or 0) % 64) end
+      if cp < 0x10000 then
+        out[#out + 1] = string.format("\\u%04X", cp)
+      else
+        cp = cp - 0x10000
+        out[#out + 1] = string.format("\\u%04X\\u%04X",
+          0xD800 + math.floor(cp / 0x400), 0xDC00 + (cp % 0x400))
+      end
+      i = i + len
+    end
+  end
+  return table.concat(out)
+end
+
+function tournamentPayload()
+  local p = {
+    board_map          = S.meta.map  ~= "" and slug(S.meta.map)  or JNULL,
+    deck               = S.meta.deck ~= "" and slug(S.meta.deck) or JNULL,
+    undrafted_faction  = JNULL,
+    undrafted_vagabond = JNULL,
+    undrafted_captains = JLIST,
+    participants       = {},
+  }
   for _, fac in ipairs(ROSTER) do
     if S.unpicked[fac] == true then
       p.undrafted_faction = FACTION_SLUG[fac] or slug(fac)
@@ -1092,10 +1131,21 @@ function tournamentPayload()   -- global: the tests drive it directly
       break
     end
   end
-  local parts = {}
   for i, row in ipairs(S.rows) do
-    local e = { faction = FACTION_SLUG[row.fac] or slug(row.fac), turn_order = i }
-    if row.player ~= nil and row.player ~= "" then e.player = row.player end
+    local e = {
+      player            = (row.player ~= nil and row.player ~= "") and row.player or JNULL,
+      coalition         = JNULL,              -- not tracked
+      faction           = FACTION_SLUG[row.fac] or slug(row.fac),
+      dominance         = JNULL,
+      vagabond          = JNULL,
+      captains          = JLIST,              -- not tracked
+      discarded_captain = JNULL,              -- not tracked
+      starting_leader   = JNULL,
+      brazen_demagogue  = false,
+      tournament_score  = JNULL,              -- an outcome, not a game fact
+      turn_order        = i,
+      turns             = {},
+    }
     if row.variant ~= nil and row.variant ~= "" then
       if row.fac == "Eyrie" then e.starting_leader = row.variant
       elseif row.fac == "Vagabond" or row.fac == "Knaves" then e.vagabond = slug(row.variant) end
@@ -1106,19 +1156,29 @@ function tournamentPayload()   -- global: the tests drive it directly
       end
       e.brazen_demagogue = (row.dom.kind == "brazen_demagogue")
     end
-    local turns = {}
     for r, sc in ipairs(row.locks or {}) do
       if type(sc) == "number" and sc >= 0 then
         local t = { turn = r, score = sc }
         if row.dom ~= nil and row.dom.round ~= nil and r >= row.dom.round then t.dominance = true end
-        table.insert(turns, t)
+        table.insert(e.turns, t)
       end
     end
-    if #turns > 0 then e.turns = turns end
-    table.insert(parts, e)
+    if #e.turns == 0 then e.turns = JLIST end
+    table.insert(p.participants, e)
   end
-  p.participants = parts
+  if #p.participants == 0 then p.participants = JLIST end
   return p
+end
+
+-- The one JSON this object produces.
+function exportJson()
+  local text = ""
+  pcall(function()
+    text = asciiOnly(JSON.encode(tournamentPayload()))
+      :gsub('"' .. JNULL .. '"', "null")
+      :gsub('"' .. JLIST .. '"', "[]")
+  end)
+  return text
 end
 
 local function exportPayload(kind, extra)
@@ -1912,29 +1972,15 @@ end
 -- a selectable box holding the JSON - one Ctrl+A + Ctrl+C away. The text is
 -- injected via setAttribute AFTER the rebuild because entities in XML
 -- attributes never decode (a JSON quote would wreck the parse).
-function uiCopy()
-  S.overlay = (S.overlay == "copy") and nil or "copy"
-  rebuildUI()
-end
-
 function uiExport(player)
-  local by = player and player.steam_name or ""
-  S.exportBy = by
-  local payload = exportPayload("export", { log = S.log, exportedBy = by })
+  S.exportBy = player and player.steam_name or ""
+  local json = exportJson()
+  writeExportNotebook(json)
   local toDiscord = postDiscord(fencedChunks(boxText()))
-  local body = JSON.encode(payload)
-  local title = "BoxScore"
-  local done = false
-  for _, t in ipairs(Notes.getNotebookTabs()) do
-    if t.title == title then
-      Notes.editNotebookTab({ index = t.index, title = title, body = body })
-      done = true
-    end
-  end
-  if not done then Notes.addNotebookTab({ title = title, body = body }) end
-  S.lastExport = os.date("%H:%M")
-    .. (toDiscord and " &#183; discord&#8230;" or " (no webhook set)")
-  dbg("BoxScore: exported" .. (toDiscord and " (discord)" or ""))
+  S.lastExport = os.date("%H:%M") .. " &#183; "
+    .. (toDiscord and "sent to Discord"
+                   or ("no webhook &#8211; JSON in Notebook &#8220;" .. NOTEBOOK_TAB .. "&#8221;"))
+  dbg("BoxScore: exported " .. #json .. " chars" .. (toDiscord and " (discord)" or " (notebook)"))
   rebuildUI()
 end
 
@@ -2274,107 +2320,20 @@ local function renderMinRows()
   return math.max(1, n or 4)
 end
 
--- The COPY box has now come up empty three ways: the JSON inline with only & < ' escaped, a single
--- async setAttribute, and setAttribute on a few timers. So this stops relying on any ONE mechanism
--- and does all of them, which is safe because they all write the same string.
---
--- The inline route is retried because the payload CHANGED: it is the compact tournament record now,
--- not the whole internal one, so the length problem is gone -- and this time the JSON's own double
--- quotes are escaped too. They are legal XML inside a single-quoted attribute, which is why they
--- were left alone before, but TTS's XmlUI is not a real XML parser and every value in a JSON string
--- is wrapped in them.
--- \uXXXX-escape everything outside ASCII, AND the three characters that are special in XML. Both
--- stay valid JSON that the site reads identically, but the string handed to TTS is then plain ASCII
--- with no &, < or > anywhere -- so TTS's inner-text entity bug (nolt #941: entities in element
--- content render raw, or in newer builds throw a parse error) has nothing to act on, and no escaping
--- of our own is needed. The observed payload also carried a raw U+2122 in a player name.
-local XML_SPECIAL = { ["&"] = "\\u0026", ["<"] = "\\u003C", [">"] = "\\u003E" }
-
-function asciiOnly(str)
-  local out, i, n = {}, 1, #str
-  while i <= n do
-    local b = str:byte(i)
-    local ch = str:sub(i, i)
-    if XML_SPECIAL[ch] then out[#out + 1] = XML_SPECIAL[ch]; i = i + 1
-    elseif b < 128 then out[#out + 1] = ch; i = i + 1
-    else
-      local len, cp
-      if     b >= 240 then len, cp = 4, b - 240
-      elseif b >= 224 then len, cp = 3, b - 224
-      elseif b >= 192 then len, cp = 2, b - 192
-      else                 len, cp = 1, b end
-      for k = 1, len - 1 do cp = cp * 64 + ((str:byte(i + k) or 0) % 64) end
-      if cp < 0x10000 then
-        out[#out + 1] = string.format("\\u%04X", cp)
-      else
-        cp = cp - 0x10000
-        out[#out + 1] = string.format("\\u%04X\\u%04X",
-          0xD800 + math.floor(cp / 0x400), 0xDC00 + (cp % 0x400))
-      end
-      i = i + len
-    end
-  end
-  return table.concat(out)
-end
-
--- Nothing left to escape: asciiOnly already turned &, < and > into JSON \u escapes, and a double
--- quote is ordinary text inside element content. Emitting entities here would be actively wrong --
--- TTS renders them raw in inner text. This only asserts the payload really is clean.
-function escInner(str)
-  str = tostring(str or "")
-  if str:find("[&<>]") then                      -- should be impossible; never ship broken XML
-    str = str:gsub("&", " "):gsub("<", " "):gsub(">", " ")
-  end
-  return str
-end
-
--- Break the payload at commas. A JSON object has no spaces and no newlines in it -- it is a single
--- unbroken token, thousands of characters long -- and a multiline field has nowhere to wrap it. Every
--- InputField in this file that works carries a short value. JSON permits whitespace between tokens,
--- so this stays valid for the site and merely gives the renderer somewhere to break.
-function wrapJson(str, width)
-  width = width or 60
-  local out, line = {}, 0
-  for i = 1, #str do
-    local ch = str:sub(i, i)
-    out[#out + 1] = ch
-    line = line + 1
-    if ch == "," and line >= width then out[#out + 1] = "\n"; line = 0 end
-  end
-  return table.concat(out)
-end
-
-function copyFieldText()
-  local text = ""
-  pcall(function() text = asciiOnly(JSON.encode(tournamentPayload())) end)
-  return text
-end
-
--- Also drop the same JSON into a notebook tab. This is the ONE route in this file already proven to
--- work at the table -- uiExport has always written the internal record this way -- so whatever the
--- InputField is doing, the payload is reachable: Notebook -> "BoxScore JSON", select, copy.
-function writeCopyNotebook(text)
-  local title = "BoxScore JSON"
+-- One notebook tab, rewritten on every export. TTS has no clipboard API and an InputField here
+-- cannot be filled from script (measured: it renders a placeholder but never text set by the
+-- script, in any container, by any of attribute / inner text / setAttribute / setValue). The
+-- notebook body is a native text area that never touches the XML layer, so that is where the JSON
+-- goes -- and it is the SAME single payload that would go to Discord, never a second copy.
+function writeExportNotebook(text)
   local done = false
   for _, t in ipairs(Notes.getNotebookTabs()) do
-    if t.title == title then
-      Notes.editNotebookTab({ index = t.index, title = title, body = text })
+    if t.title == NOTEBOOK_TAB then
+      Notes.editNotebookTab({ index = t.index, title = NOTEBOOK_TAB, body = text })
       done = true
     end
   end
-  if not done then Notes.addNotebookTab({ title = title, body = text }) end
-end
-
--- No setAttribute, no setValue, no timers. Both are documented as broken for this exact case:
---   nolt #1317  setAttribute(id, "text", v) CLEARS an InputField when v is a JSON object -- a bare
---               "{}" is enough. getAttribute still returns the value; only the display goes blank.
---   nolt #2151  setValue updates the value but never what the element displays.
--- So the pushes were not a fallback, they were the thing wiping the inner text. The field is set
--- once, by setXml, as element content. All this does now is keep the notebook copy.
-function fillCopyField()
-  local text = copyFieldText()
-  if text == "" then return end
-  pcall(function() writeCopyNotebook(text) end)
+  if not done then Notes.addNotebookTab({ title = NOTEBOOK_TAB, body = text }) end
 end
 
 function rebuildUI()
@@ -2658,8 +2617,6 @@ function rebuildUI()
       .. ' text="END TURN" onClick="uiEndTurn"/>')
   end
   add('<Button fontSize="12" fontStyle="Bold" preferredWidth="66" ' .. BTN_SOFT .. ' text="EXPORT" onClick="uiExport"/>')
-  add('<Button fontSize="12" fontStyle="Bold" preferredWidth="52" '
-    .. ((S.overlay == "copy") and BTN_GOLD or BTN_SOFT) .. ' text="COPY" onClick="uiCopy"/>')
   add('<Button fontSize="12" fontStyle="Bold" preferredWidth="56" ' .. (S.setup and BTN_GOLD or BTN_SOFT)
     .. ' text="' .. (S.setup and "DONE" or "EDIT") .. '" onClick="uiSetup"/>')
   add('<Button fontSize="12" fontStyle="Bold" preferredWidth="52" '
@@ -2731,33 +2688,6 @@ function rebuildUI()
       end
     end
     add('</VerticalLayout></Panel>')
-  elseif S.overlay == "copy" then
-    add('<Panel width="' .. (W - 160) .. '" height="210" color="' .. WALNUT .. '">')
-    add('<VerticalLayout padding="12 12 10 8" spacing="5" childForceExpandHeight="false">')
-    add('<Text fontSize="12" fontStyle="Bold" color="' .. PARCH .. '" preferredHeight="16"'
-      .. ' alignment="MiddleLeft"' .. NOClick
-      .. '>the box-score record as JSON</Text>')
-    -- NO InputField. Measured over five rounds in the maintainer's own game: an InputField here
-    -- renders its PLACEHOLDER but never text set from script -- not via the text attribute, not as
-    -- inner text, not via setAttribute or setValue, with or without an id, in any container. The last
-    -- control was a byte-for-byte clone of this panel's own field carrying the word HELLO and showed
-    -- neither the word nor its placeholder. A permanently empty box is worse than no box.
-    --
-    -- The notebook is not a fallback, it is the mechanism. TTS has no clipboard API; its notebook body
-    -- is a native text area that never touches the XML layer, and it has worked from the first try.
-    add('<Text fontSize="15" fontStyle="Bold" color="' .. GOLD .. '" preferredHeight="26"'
-      .. ' alignment="MiddleLeft"' .. NOClick .. '>Written to the Notebook, tab &#8220;BoxScore JSON&#8221;</Text>')
-    add('<Text fontSize="13" color="' .. PARCH .. '" preferredHeight="22" alignment="MiddleLeft"'
-      .. NOClick .. '>Open the Notebook at the top of the screen, click that tab, Ctrl+A, Ctrl+C.</Text>')
-    add('<Text fontSize="13" color="' .. PARCH .. '" preferredHeight="22" alignment="MiddleLeft"'
-      .. NOClick .. '>' .. #copyFieldText() .. ' characters, rewritten every time you press COPY.</Text>')
-    fillCopyField()
-    add('<HorizontalLayout preferredHeight="26" spacing="6" childForceExpandWidth="false">')
-    add('<Text flexibleWidth="1"' .. NOClick .. '> </Text>')
-    add('<Button fontSize="12" fontStyle="Bold" preferredWidth="70" ' .. BTN_GOLD
-      .. ' text="DONE" onClick="uiOverlayClose"/>')
-    add('</HorizontalLayout>')
-    add('</VerticalLayout></Panel>')
   elseif S.overlay == "info" then
     add('<Panel width="' .. (W - 110) .. '" height="430" color="' .. WALNUT .. '">')
     add('<VerticalLayout padding="20 20 14 10" spacing="3">')
@@ -2776,8 +2706,8 @@ function rebuildUI()
       "Everything runs automatically once the TTS turn order is set and every faction has its seated player: each turn pass records the finishing faction by itself. Without that, END TURN records the highlighted faction. A lock always writes the highlighted round column, overwriting whatever it holds.")
     section("EDIT", 44,
       "Correct anything: scores (click a cell), the round (click a column number), whose turn it is (click a portrait), faction order (&#9650;), player names, the Eyrie commander / Knaves captains / vagabond character (&#9660;), map, deck, game name and the unpicked faction.")
-    section("EXPORT", 40,
-      "Posts the box score to Discord (set the webhook under DISCORD) and to the notebook. The footer reads confirmed with Discord once Discord has acknowledged the message. COPY opens the same record as selectable JSON &#8211; click the box, Ctrl+A, Ctrl+C (no other program needed).")
+    section("EXPORT", 44,
+      "Writes the game as JSON to the notebook tab &#8220;" .. NOTEBOOK_TAB .. "&#8221; &#8211; open the Notebook at the top of the screen, click that tab, Ctrl+A, Ctrl+C. Set a webhook under EDIT &#8594; DISCORD and the same record is posted there too; the footer then reads sent to Discord. One record either way, never two.")
     section("CRAFT", 44,
       "Watches the map's item supply. An item taken from it and placed by a faction's board is recorded as crafted that round, with its picture on the round's score cell. Returning an item to the supply cancels the craft. In EDIT, the ITEMS button corrects or adds crafts: click T# to pick the round, &#215; removes, + adds. Turning CRAFT off hides all crafts, exports included.")
     section("RESET", 16,
