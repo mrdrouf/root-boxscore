@@ -268,8 +268,8 @@ def t_copy_field_uses_double_quoted_attributes(src):
     # a single-quoted ATTRIBUTE looks like name=' ; the Lua string literals' own quotes are fine
     bad = _re.findall(r"[a-zA-Z]+='", decl)
     assert not bad, "single-quoted attributes are back on the copy field: %s" % bad
-    assert "esc(copyFieldText())" in decl, \
-        "the field is not carrying the JSON in the text attribute: %s" % decl[:200]
+    assert "esc(wrapJson(copyFieldText()))" in decl, \
+        "the field is not carrying the wrapped JSON in the text attribute: %s" % decl[:200]
     # inner text was MEASURED not to render: probe A carried plain text between the tags and was blank
     assert "escInner(copyFieldText())" not in decl, "inner text is back, and it does not render"
 

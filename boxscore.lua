@@ -2328,6 +2328,22 @@ function escInner(str)
   return str
 end
 
+-- Break the payload at commas. A JSON object has no spaces and no newlines in it -- it is a single
+-- unbroken token, thousands of characters long -- and a multiline field has nowhere to wrap it. Every
+-- InputField in this file that works carries a short value. JSON permits whitespace between tokens,
+-- so this stays valid for the site and merely gives the renderer somewhere to break.
+function wrapJson(str, width)
+  width = width or 60
+  local out, line = {}, 0
+  for i = 1, #str do
+    local ch = str:sub(i, i)
+    out[#out + 1] = ch
+    line = line + 1
+    if ch == "," and line >= width then out[#out + 1] = "\n"; line = 0 end
+  end
+  return table.concat(out)
+end
+
 function copyFieldText()
   local text = ""
   pcall(function() text = asciiOnly(JSON.encode(tournamentPayload())) end)
@@ -2744,32 +2760,28 @@ function rebuildUI()
     add('<InputField id="cpyfld" fontSize="10" preferredHeight="104" lineType="MultiLineNewLine"'
       .. ' colors="#F1E5C8|#FFFFFF|#FFFFFF|#00000000" textColor="' .. INKTXT .. '"'
       .. ' placeholder="&#60;&#60;EMPTY&#62;&#62;"'
-      .. ' text="' .. esc(copyFieldText()) .. '"/>')
+      .. ' text="' .. esc(wrapJson(copyFieldText())) .. '"/>')
 
-    -- ROUND 4. Round 3 was unreadable and that was my doing: A and B cloned the working field's
-    -- IF_COLORS, whose background is #00000000 -- transparent boxes with dark RUST text on a dark
-    -- brown panel. Invisible either way, so they proved nothing.
+    -- ROUND 5. Round 4 invalidated itself: probe 1 carried NO text attribute and still did not show
+    -- its placeholder, while the main field shows <<EMPTY>> perfectly. The difference is the
+    -- CONTAINER -- those probes sat in a HorizontalLayout, which renders a field's label but not the
+    -- field's own text. They are now emitted exactly like the main field: straight into this
+    -- VerticalLayout, multiline, same colours, differing only in the text attribute.
     --
-    -- What round 3 DID establish: the main field renders its placeholder, so it is genuinely EMPTY
-    -- with the escaped JSON in text="..." -- and &#60; decodes correctly in an attribute, since the
-    -- placeholder shows as <<EMPTY>>. Entities are not the problem.
-    --
-    -- Every probe below is now identical to every other -- white box, black text, size 14, a
-    -- placeholder that says what it is -- and differs ONLY in the text attribute. P1 carries no text
-    -- attribute at all, so it MUST show its placeholder; if it does not, nothing here is trustworthy.
-    local function probe4(id, label, attr)
-      add('<HorizontalLayout preferredHeight="34" spacing="4">')
-      add('<Text fontSize="12" color="' .. PARCH .. '" preferredWidth="150" alignment="MiddleRight"'
+    -- The leading hypothesis is now about the STRING rather than the markup. A JSON object contains
+    -- no space and no newline, so it is a single unbroken token thousands of characters long, and a
+    -- multiline field has nowhere to wrap it. Probe 4 carries the payload broken at commas.
+    local function probe5(label, attr)
+      add('<Text fontSize="11" color="' .. PARCH .. '" preferredHeight="14" alignment="MiddleLeft"'
         .. NOClick .. '>' .. label .. '</Text>')
-      add('<InputField id="' .. id .. '" fontSize="14" flexibleWidth="1"'
+      add('<InputField fontSize="12" preferredHeight="26" lineType="MultiLineNewLine"'
         .. ' placeholder="SHOWS-PLACEHOLDER" colors="#FFFFFF|#FFFFFF|#FFFFFF|#FFFFFF"'
         .. ' textColor="#000000"' .. attr .. '/>')
-      add('</HorizontalLayout>')
     end
-    probe4("dbgA", "1 no text attr",  "")
-    probe4("dbgB", "2 text=HELLO",    ' text="HELLO"')
-    probe4("dbgC", "3 text={&#34;a&#34;:1}", ' text="{&#34;a&#34;:1}"')
-    probe4("dbgD", "4 text=payload",  ' text="' .. esc(copyFieldText()) .. '"')
+    probe5("1 no text attr",     "")
+    probe5("2 text=HELLO",       ' text="HELLO"')
+    probe5("3 short json",       ' text="{&#34;a&#34;:1}"')
+    probe5("4 payload, wrapped", ' text="' .. esc(wrapJson(copyFieldText())) .. '"')
     fillCopyField()
     add('<HorizontalLayout preferredHeight="26" spacing="6" childForceExpandWidth="false">')
     add('<Text flexibleWidth="1"' .. NOClick .. '> </Text>')
