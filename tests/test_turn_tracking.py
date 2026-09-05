@@ -239,7 +239,7 @@ def t_export_emits_the_full_schema(src):
     for fac, e in got.items():
         assert set(e) == FIELDS, "%s has %s" % (fac, sorted(set(e) ^ FIELDS))
         assert e["captains"] == [], "captains must be [] for %s" % fac
-        assert e["coalition"] is None and e["tournament_score"] is None
+        assert e["coalition"] is None
         # nobody is seated in the fixture, so the id must be null rather than absent or ""
         assert e["player_steam_id"] is None, "%s: %r" % (fac, e["player_steam_id"])
 
@@ -285,6 +285,31 @@ def t_no_copy_button_or_overlay(src):
         assert dead not in src, "%s survived the cleanup" % dead
 
 
+def t_tournament_score_marks_the_winner(src):
+    """1 for the winner, 0 for the rest, null while the game is unfinished.
+
+    The site reads this as the result: 1 or 0.5 is a win, 0 a loss. The object already knows the
+    winner both ways Root ends -- a marker reaching 30, or the DOM WIN button -- so it fills it
+    rather than leaving the site to infer it. An unfinished game must NOT report losses.
+    """
+    import json as _json
+
+    p = _json.loads(_export_fixture(src).globals().__fixture())          # no winner recorded yet
+    assert all(e["tournament_score"] is None for e in p["participants"]), \
+        "an unfinished game claimed a result"
+
+    p = _json.loads(_export_fixture(src, '  S.winner = "Alliance"').globals().__fixture())
+    got = {e["faction"]: e["tournament_score"] for e in p["participants"]}
+    assert got["woodland-alliance"] == 1, got
+    assert all(v == 0 for f, v in got.items() if f != "woodland-alliance"), got
+
+    # a dominance win is recorded the same way, just with a different reason
+    p = _json.loads(_export_fixture(
+        src, '  S.winner = "Rats"  S.winnerReason = "dominance"').globals().__fixture())
+    got = {e["faction"]: e["tournament_score"] for e in p["participants"]}
+    assert got["lord-of-the-hundreds"] == 1 and got["woodland-alliance"] == 0, got
+
+
 def t_steam_id_is_read_from_the_seat(src):
     """A seated player's Steam id lands on their row; an unseated colour gives null.
 
@@ -316,6 +341,7 @@ def t_export_is_pure_ascii(src):
 DIRECT += [("export emits the full schema",   t_export_emits_the_full_schema),
            ("one record, one notebook tab",    t_export_is_one_record_to_one_tab),
            ("no COPY button or overlay",       t_no_copy_button_or_overlay),
+           ("tournament score marks winner",   t_tournament_score_marks_the_winner),
            ("steam id read from the seat",     t_steam_id_is_read_from_the_seat),
            ("export payload is pure ascii",    t_export_is_pure_ascii)]
 

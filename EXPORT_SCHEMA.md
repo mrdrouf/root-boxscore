@@ -122,9 +122,9 @@ placeholders for that, since `JSON.encode` drops a nil and writes `{}` for an em
 | `vagabond` | `row.variant` | the variant auto-detect resolves the character for Vagabond and Knaves |
 | `starting_leader` | `row.variant` | the SAME field: for the Eyrie it holds a leader, not a character |
 | `undrafted_faction` / `undrafted_vagabond` | `S.unpicked`, `S.unpickedVar` | first unpicked faction |
-| `coalition` | not tracked | always `null` |
+| `coalition` | not tracked | always `null` -- see `tournament_score` for why this matters |
 | `captains` / `discarded_captain` | not tracked | always `[]` / `null` |
-| `tournament_score` | not tracked | an outcome, not a game fact; always `null` |
+| `tournament_score` | `S.winner` | **1** for the winner, **0** for everyone else, `null` while the game is unfinished. Root ends two ways and the object knows both: a marker reaching 30 (`S.winnerReason = "score"`) and the DOM WIN button (`"dominance"`). **0.5** means a SHARED win, which in Root is a coalition; coalitions are not tracked, so a shared result needs correcting on the site. |
 
 Non-ASCII is `\uXXXX`-escaped so the payload survives being pasted through Discord, a web form or a
 terminal. It is the same JSON either way.

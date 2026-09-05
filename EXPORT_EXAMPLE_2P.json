@@ -16,7 +16,7 @@
       "discarded_captain": null,
       "starting_leader": null,
       "brazen_demagogue": false,
-      "tournament_score": null,
+      "tournament_score": 1,
       "turn_order": 1,
       "turns": [
         { "turn": 1, "score": 4 },
@@ -38,7 +38,7 @@
       "discarded_captain": null,
       "starting_leader": "Commander",
       "brazen_demagogue": false,
-      "tournament_score": null,
+      "tournament_score": 0,
       "turn_order": 2,
       "turns": [
         { "turn": 1, "score": 2 },

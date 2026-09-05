@@ -16,37 +16,16 @@
       "discarded_captain": null,
       "starting_leader": null,
       "brazen_demagogue": false,
-      "tournament_score": null,
+      "tournament_score": 1,
       "turn_order": 1,
       "turns": [
-        {
-          "turn": 1,
-          "score": 3
-        },
-        {
-          "turn": 2,
-          "score": 8
-        },
-        {
-          "turn": 3,
-          "score": 14
-        },
-        {
-          "turn": 4,
-          "score": 19
-        },
-        {
-          "turn": 5,
-          "score": 25
-        },
-        {
-          "turn": 6,
-          "score": 28
-        },
-        {
-          "turn": 7,
-          "score": 30
-        }
+        { "turn": 1, "score": 3 },
+        { "turn": 2, "score": 8 },
+        { "turn": 3, "score": 14 },
+        { "turn": 4, "score": 19 },
+        { "turn": 5, "score": 25 },
+        { "turn": 6, "score": 28 },
+        { "turn": 7, "score": 30 }
       ]
     },
     {
@@ -60,21 +39,12 @@
       "discarded_captain": null,
       "starting_leader": null,
       "brazen_demagogue": true,
-      "tournament_score": null,
+      "tournament_score": 0,
       "turn_order": 2,
       "turns": [
-        {
-          "turn": 1,
-          "score": 1
-        },
-        {
-          "turn": 2,
-          "score": 4
-        },
-        {
-          "turn": 3,
-          "score": 8
-        },
+        { "turn": 1, "score": 1 },
+        { "turn": 2, "score": 4 },
+        { "turn": 3, "score": 8 },
         {
           "turn": 4,
           "score": 14,
@@ -103,33 +73,15 @@
       "discarded_captain": null,
       "starting_leader": null,
       "brazen_demagogue": false,
-      "tournament_score": null,
+      "tournament_score": 0,
       "turn_order": 3,
       "turns": [
-        {
-          "turn": 1,
-          "score": 1
-        },
-        {
-          "turn": 2,
-          "score": 4
-        },
-        {
-          "turn": 3,
-          "score": 8
-        },
-        {
-          "turn": 4,
-          "score": 10
-        },
-        {
-          "turn": 5,
-          "score": 10
-        },
-        {
-          "turn": 6,
-          "score": 10
-        }
+        { "turn": 1, "score": 1 },
+        { "turn": 2, "score": 4 },
+        { "turn": 3, "score": 8 },
+        { "turn": 4, "score": 10 },
+        { "turn": 5, "score": 10 },
+        { "turn": 6, "score": 10 }
       ]
     },
     {
@@ -143,29 +95,14 @@
       "discarded_captain": null,
       "starting_leader": "Commander",
       "brazen_demagogue": false,
-      "tournament_score": null,
+      "tournament_score": 0,
       "turn_order": 4,
       "turns": [
-        {
-          "turn": 1,
-          "score": 3
-        },
-        {
-          "turn": 2,
-          "score": 8
-        },
-        {
-          "turn": 3,
-          "score": 14
-        },
-        {
-          "turn": 4,
-          "score": 19
-        },
-        {
-          "turn": 5,
-          "score": 25
-        },
+        { "turn": 1, "score": 3 },
+        { "turn": 2, "score": 8 },
+        { "turn": 3, "score": 14 },
+        { "turn": 4, "score": 19 },
+        { "turn": 5, "score": 25 },
         {
           "turn": 6,
           "score": 29,

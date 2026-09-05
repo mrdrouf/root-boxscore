@@ -1146,7 +1146,15 @@ function tournamentPayload()
       break
     end
   end
+  -- The site reads tournament_score as the result: 1 or 0.5 is a win, 0 a loss. The object already
+  -- knows the winner both ways a game of Root ends -- S.winner is set when a marker reaches 30
+  -- (S.winnerReason "score") and by the DOM WIN button (reason "dominance"). While no winner is
+  -- recorded the game is unfinished, and every score stays null rather than claiming four losses.
+  -- 0.5 is a SHARED win, which in Root means a coalition; coalitions are not tracked here, so a
+  -- shared result has to be corrected on the site.
   for i, row in ipairs(S.rows) do
+    local won = JNULL
+    if S.winner ~= nil then won = (row.fac == S.winner) and 1 or 0 end
     local e = {
       player            = (row.player ~= nil and row.player ~= "") and row.player or JNULL,
       player_steam_id   = steamIdFor(row.color) or JNULL,
@@ -1158,7 +1166,7 @@ function tournamentPayload()
       discarded_captain = JNULL,              -- not tracked
       starting_leader   = JNULL,
       brazen_demagogue  = false,
-      tournament_score  = JNULL,              -- an outcome, not a game fact
+      tournament_score  = won,                -- 1 winner, 0 loser, null while the game is unfinished
       turn_order        = i,
       turns             = {},
     }
