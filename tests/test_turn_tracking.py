@@ -260,9 +260,11 @@ def t_copy_field_uses_double_quoted_attributes(src):
     placeholder, which is exactly what was reported three times.
     """
     import re as _re
-    # the MARKUP, not the comment above it that also mentions the id
+    # the MARKUP, not the comment above it that also mentions the id. The element is self-closing
+    # again now that inner text is known not to render, so end at the emitted "/>".
     i = src.index('<InputField id="cpyfld"')
-    decl = src[src.rindex("add(", 0, i):src.index("</InputField>", i) + len("</InputField>")]
+    end = src.index('"/>', i)
+    decl = src[src.rindex("add(", 0, i):end + 3]
     # a single-quoted ATTRIBUTE looks like name=' ; the Lua string literals' own quotes are fine
     bad = _re.findall(r"[a-zA-Z]+='", decl)
     assert not bad, "single-quoted attributes are back on the copy field: %s" % bad
