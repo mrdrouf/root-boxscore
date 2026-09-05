@@ -485,6 +485,29 @@ local function dominanceMarkerState(row, cards, objects)
   return state
 end
 
+-- Coalition (Root, Vagabond, 4+ players): a Vagabond cannot rule, so instead of activating a
+-- dominance card for dominance it forms a coalition -- its score marker leaves the track onto an
+-- ally's board, it stops scoring, and it wins if that ally wins. The ally must be the player with
+-- the FEWEST points (choose among ties) and must not have activated a dominance card themselves.
+-- The fewest-points part is a judgement at the moment of play, so the button offers the eligible
+-- rows rather than picking for you; ineligible ones are simply not offered.
+local COALITION_FACTIONS = { Vagabond = true, Knaves = true }
+
+local function canCoalition(row)
+  return row ~= nil and COALITION_FACTIONS[row.fac] == true
+end
+
+local function coalitionCandidates(row)
+  local out = {}
+  for _, other in ipairs(S.rows) do
+    -- not yourself, not another vagabond, and not someone who has already activated dominance
+    if other.fac ~= row.fac and not COALITION_FACTIONS[other.fac] and other.dom == nil then
+      table.insert(out, other.fac)
+    end
+  end
+  return out
+end
+
 local function dominanceFrozen(row)
   return row ~= nil and row.dom ~= nil and row.dom.frozen ~= false
 end
@@ -1146,19 +1169,27 @@ function tournamentPayload()
       break
     end
   end
-  -- The site reads tournament_score as the result: 1 or 0.5 is a win, 0 a loss. The object already
-  -- knows the winner both ways a game of Root ends -- S.winner is set when a marker reaches 30
-  -- (S.winnerReason "score") and by the DOM WIN button (reason "dominance"). While no winner is
-  -- recorded the game is unfinished, and every score stays null rather than claiming four losses.
-  -- 0.5 is a SHARED win, which in Root means a coalition; coalitions are not tracked here, so a
-  -- shared result has to be corrected on the site.
+  -- The site reads tournament_score as the result: 1 or 0.5 is a win, 0 a loss. The object knows the
+  -- winner both ways a game of Root ends -- S.winner is set when a marker reaches 30 (S.winnerReason
+  -- "score") and by the DOM WIN button ("dominance"). While no winner is recorded the game is
+  -- unfinished and every score stays null, rather than claiming a table of losses.
+  --
+  -- A coalition makes the win SHARED: a vagabond allied to the winner wins with them, so both take
+  -- 0.5 rather than the winner taking 1 alone.
+  local shared = false
+  for _, row in ipairs(S.rows) do
+    if S.winner ~= nil and row.coalition == S.winner then shared = true end
+  end
   for i, row in ipairs(S.rows) do
     local won = JNULL
-    if S.winner ~= nil then won = (row.fac == S.winner) and 1 or 0 end
+    if S.winner ~= nil then
+      local isWinner = (row.fac == S.winner) or (row.coalition ~= nil and row.coalition == S.winner)
+      won = isWinner and (shared and 0.5 or 1) or 0
+    end
     local e = {
       player            = (row.player ~= nil and row.player ~= "") and row.player or JNULL,
       player_steam_id   = steamIdFor(row.color) or JNULL,
-      coalition         = JNULL,              -- not tracked
+      coalition         = (row.coalition ~= nil) and (FACTION_SLUG[row.coalition] or slug(row.coalition)) or JNULL,
       faction           = FACTION_SLUG[row.fac] or slug(row.fac),
       dominance         = JNULL,
       vagabond          = JNULL,
@@ -1264,6 +1295,17 @@ local function postDiscord(chunks)
 end
 
 -- split lines into fenced messages under Discord's 2000-char limit
+-- The same 1800-char split as fencedChunks, but for one long unbroken string, tagged ```json so
+-- Discord highlights it and a bot can find it.
+local function jsonChunks(text)
+  local out, i, n = {}, 1, #text
+  while i <= n do
+    out[#out + 1] = "```json\n" .. text:sub(i, i + 1749) .. "\n```"
+    i = i + 1750
+  end
+  return out
+end
+
 local function fencedChunks(lines)
   local chunks, cur, len = {}, {}, 0
   for _, l in ipairs(lines) do
@@ -2000,7 +2042,13 @@ function uiExport(player)
   S.exportBy = player and player.steam_name or ""
   local json = exportJson()
   writeExportNotebook(json)
-  local toDiscord = postDiscord(fencedChunks(boxText()))
+  -- The readable table first, then the SAME json in its own ```json fence. That answers the site's
+  -- "how would an API work" directly: a Discord webhook needs no API and no callback, because the
+  -- destination is baked into the URL -- the sheet POSTs out, nothing has to reach back in. A bot
+  -- reading the channel gets a machine-readable record for free, beside the human one.
+  local msgs = fencedChunks(boxText())
+  for _, chunk in ipairs(jsonChunks(json)) do table.insert(msgs, chunk) end
+  local toDiscord = postDiscord(msgs)
   S.lastExport = (toDiscord and "exported &#183; sent to Discord"
                              or ("exported &#183; JSON in TTS Notebook &#8220;" .. NOTEBOOK_TAB .. "&#8221;"))
   dbg("BoxScore: exported " .. #json .. " chars" .. (toDiscord and " (discord)" or " (notebook)"))
@@ -2102,6 +2150,16 @@ function uiRowBtn(player, _, id)
     if S.rows[i] then
       S.pinFirst = false      -- deliberate row pick: do not snap it back
       S.active = i
+      rebuildUI()
+    end
+  elseif kind == "coal" then
+    local row = S.rows[i]
+    if row and canCoalition(row) then
+      local cands = coalitionCandidates(row)
+      local at = 0
+      for k, fac in ipairs(cands) do if fac == row.coalition then at = k end end
+      row.coalition = cands[at + 1]          -- nil past the end: cycles back to no coalition
+      logev("coalition", row.fac, row.coalition or "none")
       rebuildUI()
     end
   elseif kind == "domwin" then
@@ -2553,9 +2611,16 @@ function rebuildUI()
       add('<Text fontSize="9" fontStyle="Bold" color="' .. RUST
         .. '" preferredHeight="16" alignment="MiddleCenter"' .. NOClick .. '>dom '
         .. esc(row.dom.suit) .. ' T' .. tostring(row.dom.turn) .. '</Text>')
-      add('<Button id="domwin_' .. i .. '" fontSize="10" fontStyle="Bold" preferredHeight="18" '
-        .. ((row.dom.won == true) and BTN_GOLD or BTN_SOFT)
-        .. ' text="dom win" onClick="uiRowBtn"/>')
+      if canCoalition(row) then
+        -- a vagabond's dominance card buys a coalition, never a dominance win
+        add('<Button id="coal_' .. i .. '" fontSize="10" fontStyle="Bold" preferredHeight="18" '
+          .. ((row.coalition ~= nil) and BTN_GOLD or BTN_SOFT)
+          .. ' text="' .. esc(row.coalition and ("+" .. row.coalition) or "coalition") .. '" onClick="uiRowBtn"/>')
+      else
+        add('<Button id="domwin_' .. i .. '" fontSize="10" fontStyle="Bold" preferredHeight="18" '
+          .. ((row.dom.won == true) and BTN_GOLD or BTN_SOFT)
+          .. ' text="dom win" onClick="uiRowBtn"/>')
+      end
       add('</VerticalLayout>')
     else
       add('<Text preferredWidth="' .. domW .. '"' .. NOClick .. '> </Text>')

@@ -239,7 +239,6 @@ def t_export_emits_the_full_schema(src):
     for fac, e in got.items():
         assert set(e) == FIELDS, "%s has %s" % (fac, sorted(set(e) ^ FIELDS))
         assert e["captains"] == [], "captains must be [] for %s" % fac
-        assert e["coalition"] is None
         # nobody is seated in the fixture, so the id must be null rather than absent or ""
         assert e["player_steam_id"] is None, "%s: %r" % (fac, e["player_steam_id"])
 
@@ -310,6 +309,53 @@ def t_tournament_score_marks_the_winner(src):
     assert got["lord-of-the-hundreds"] == 1 and got["woodland-alliance"] == 0, got
 
 
+def t_coalition_shares_the_win(src):
+    """A vagabond allied to the winner wins with them: 0.5 each, not 1 and 0.
+
+    Root, Vagabond, 4+ players: a vagabond cannot rule, so its dominance card buys a coalition
+    instead. Its marker leaves the track and it wins if the ally wins. The ally must not have
+    activated a dominance card, which is why the candidate list excludes them.
+    """
+    import json as _json
+    fixture = '  S.rows[3].coalition = "Alliance"  S.winner = "Alliance"'
+    p = _json.loads(_export_fixture(src, fixture).globals().__fixture())
+    got = {e["faction"]: e for e in p["participants"]}
+    assert got["vagabond"]["coalition"] == "woodland-alliance", got["vagabond"]["coalition"]
+    assert got["vagabond"]["tournament_score"] == 0.5, "the ally must share the win"
+    assert got["woodland-alliance"]["tournament_score"] == 0.5, "a shared win is 0.5 each, not 1"
+    assert got["lord-of-the-hundreds"]["tournament_score"] == 0
+    assert got["eyrie-dynasties"]["tournament_score"] == 0
+
+    # allied to someone who did NOT win: the vagabond loses with them
+    p = _json.loads(_export_fixture(
+        src, '  S.rows[3].coalition = "Rats"  S.winner = "Alliance"').globals().__fixture())
+    got = {e["faction"]: e for e in p["participants"]}
+    assert got["woodland-alliance"]["tournament_score"] == 1, "an unshared win is still 1"
+    assert got["vagabond"]["tournament_score"] == 0
+
+
+def t_coalition_candidates_follow_the_rule(src):
+    """Only a non-vagabond who has not activated dominance can be allied with."""
+    rt = lupa.LuaRuntime(unpack_returned_tuples=True)
+    rt.execute(open(os.path.join(HERE, "tts_stub.lua"), encoding="utf-8").read())
+    rt.execute(src + """
+function __cands()
+  S.rows = {
+    { fac="Alliance", locks={}, edits={} },
+    { fac="Rats",     locks={}, edits={}, dom={ suit="bird", round=2, kind="standard" } },
+    { fac="Vagabond", locks={}, edits={}, dom={ suit="fox",  round=3, kind="standard" } },
+    { fac="Eyrie",    locks={}, edits={} },
+  }
+  local out = {}
+  for _, f in ipairs(coalitionCandidates(S.rows[3])) do out[#out+1] = f end
+  return table.concat(out, ",")
+end
+""")
+    got = rt.globals().__cands()
+    assert got == "Alliance,Eyrie", \
+        "the Rats activated dominance and must be excluded; got %r" % got
+
+
 def t_steam_id_is_read_from_the_seat(src):
     """A seated player's Steam id lands on their row; an unseated colour gives null.
 
@@ -342,6 +388,8 @@ DIRECT += [("export emits the full schema",   t_export_emits_the_full_schema),
            ("one record, one notebook tab",    t_export_is_one_record_to_one_tab),
            ("no COPY button or overlay",       t_no_copy_button_or_overlay),
            ("tournament score marks winner",   t_tournament_score_marks_the_winner),
+           ("coalition shares the win",        t_coalition_shares_the_win),
+           ("coalition candidates by rule",    t_coalition_candidates_follow_the_rule),
            ("steam id read from the seat",     t_steam_id_is_read_from_the_seat),
            ("export payload is pure ascii",    t_export_is_pure_ascii)]
 
