@@ -265,12 +265,30 @@ def t_copy_field_uses_double_quoted_attributes(src):
     # a single-quoted ATTRIBUTE looks like name=' ; the Lua string literals' own quotes are fine
     bad = _re.findall(r"[a-zA-Z]+='", decl)
     assert not bad, "single-quoted attributes are back on the copy field: %s" % bad
-    assert 'text="' in decl and "fieldText(copyFieldText())" in decl, \
-        "the copy field is not carrying its text the way the working fields do: %s" % decl[:160]
+    assert 'text=""' in decl, \
+        "the JSON is in the XML attribute again -- esc() turns every quote into &#34;: %s" % decl[:160]
 
     # and no element anywhere may drift back to single-quoted attributes
     everywhere = _re.findall(r"<[A-Za-z]+ [^>\n]*?[a-zA-Z]+='", src)
     assert not everywhere, "elements built with single-quoted attributes: %s" % everywhere[:3]
+
+
+def t_payload_is_pure_ascii(src):
+    """The pushed JSON must be ASCII: the real payload carried a raw TM in a player name."""
+    rt = lupa.LuaRuntime(unpack_returned_tuples=True)
+    rt.execute(open(os.path.join(HERE, "tts_stub.lua"), encoding="utf-8").read())
+    rt.execute(src + """
+function __ascii_fixture()
+  S.meta.map = "Marsh"
+  S.rows = { { fac = "Marquise", player = "KRT\\u{2122}McArthur", variant = "", locks = {1} } }
+  return copyFieldText()
+end
+""")
+    got = rt.globals().__ascii_fixture()
+    assert all(ord(c) < 128 for c in got), "non-ASCII survived: %r" % [c for c in got if ord(c) > 127]
+    assert "\\u2122" in got.replace("\\\\", "\\"), "the TM was dropped instead of escaped: %s" % got
+    import json as _json
+    assert _json.loads(got)["participants"][0]["player"] == "KRT\u2122McArthur"
 
 
 def t_copy_also_reaches_the_notebook(src):
@@ -303,6 +321,7 @@ end
 
 DIRECT += [("copy emits the tournament schema", t_copy_emits_the_tournament_schema),
            ("copy field double-quoted attrs",   t_copy_field_uses_double_quoted_attributes),
+           ("payload is pure ascii",            t_payload_is_pure_ascii),
            ("copy also reaches the notebook",   t_copy_also_reaches_the_notebook)]
 
 

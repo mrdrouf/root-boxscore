@@ -2283,9 +2283,37 @@ end
 -- quotes are escaped too. They are legal XML inside a single-quoted attribute, which is why they
 -- were left alone before, but TTS's XmlUI is not a real XML parser and every value in a JSON string
 -- is wrapped in them.
+-- \uXXXX-escape everything outside ASCII. Still valid JSON, and the site reads it identically, but
+-- the string handed to TTS is now plain ASCII -- the observed payload carried a raw TM in a player
+-- name ("KRT(tm)McArthur"), and TTS's UI pipeline is not to be trusted with that.
+function asciiOnly(str)
+  local out, i, n = {}, 1, #str
+  while i <= n do
+    local b = str:byte(i)
+    if b < 128 then out[#out + 1] = str:sub(i, i); i = i + 1
+    else
+      local len, cp
+      if     b >= 240 then len, cp = 4, b - 240
+      elseif b >= 224 then len, cp = 3, b - 224
+      elseif b >= 192 then len, cp = 2, b - 192
+      else                 len, cp = 1, b end
+      for k = 1, len - 1 do cp = cp * 64 + ((str:byte(i + k) or 0) % 64) end
+      if cp < 0x10000 then
+        out[#out + 1] = string.format("\\u%04X", cp)
+      else
+        cp = cp - 0x10000
+        out[#out + 1] = string.format("\\u%04X\\u%04X",
+          0xD800 + math.floor(cp / 0x400), 0xDC00 + (cp % 0x400))
+      end
+      i = i + len
+    end
+  end
+  return table.concat(out)
+end
+
 function copyFieldText()
   local text = ""
-  pcall(function() text = JSON.encode(tournamentPayload()) end)
+  pcall(function() text = asciiOnly(JSON.encode(tournamentPayload())) end)
   return text
 end
 
@@ -2315,6 +2343,7 @@ function fillCopyField()
   Wait.frames(push, 3)
   Wait.time(push, 0.4)
   Wait.time(push, 1.5)       -- after any dirty-poll rebuild that landed in between
+  Wait.time(push, 3.0)       -- and after a slow setXml on a busy table
   pcall(function() writeCopyNotebook(text) end)
 end
 
@@ -2677,17 +2706,19 @@ function rebuildUI()
     add('<VerticalLayout padding="12 12 10 8" spacing="5" childForceExpandHeight="false">')
     add('<Text fontSize="12" fontStyle="Bold" color="' .. PARCH .. '" preferredHeight="16"'
       .. ' alignment="MiddleLeft"' .. NOClick
-      .. '>the box-score record as JSON &#8211; click the box, select all (Ctrl+A), copy (Ctrl+C) &#183; also in Notebook &#8594; &#8220;BoxScore JSON&#8221;</Text>')
-    -- DOUBLE quotes, like every other element in this file. This one was built with SINGLE-quoted
-    -- attributes and it was the only one in 2900 lines that was -- TTS's XmlUI does not accept them,
-    -- so nothing here parsed: not the text, and not even id='cpyfld', which is why setAttribute and
-    -- setValue on it were silent no-ops too. It rendered as a bare InputField with the stock
-    -- "Enter text..." placeholder. One cause behind every empty box reported.
-    -- fieldText/esc is the escaper the working fields use: it turns & into +, and <, > and " into
-    -- numeric entities, which is what survives the pipeline.
+      .. '>the box-score record as JSON, " .. #copyFieldText() .. " chars &#8211; select all (Ctrl+A), copy (Ctrl+C) &#183; also in Notebook &#8594; &#8220;BoxScore JSON&#8221;</Text>')
+    -- DOUBLE quotes, like every other element in this file -- this was the only one in 2900 lines
+    -- built with single quotes, which TTS's XmlUI does not accept, so not even id="cpyfld" parsed
+    -- and every setAttribute/setValue on it was a silent no-op.
+    --
+    -- And the JSON does NOT go in the attribute. esc() rewrites every double quote as &#34;, and this
+    -- file's own hard-won comment records that TTS renders numeric entities literally -- a path no
+    -- WORKING field here has ever exercised, because a webhook URL, a thread link and a player name
+    -- contain no double quotes. A JSON payload is nothing but double quotes. So the element is
+    -- emitted empty and the text is pushed in afterwards, which never had a chance before: with the
+    -- id unparsed, the pushes had nothing to write to.
     add('<InputField id="cpyfld" fontSize="10" preferredHeight="130" lineType="MultiLineNewLine"'
-      .. ' colors="#F1E5C8|#FFFFFF|#FFFFFF|#00000000" textColor="' .. INKTXT .. '"'
-      .. ' text="' .. fieldText(copyFieldText()) .. '"/>')
+      .. ' colors="#F1E5C8|#FFFFFF|#FFFFFF|#00000000" textColor="' .. INKTXT .. '" text=""/>')
     fillCopyField()
     add('<HorizontalLayout preferredHeight="26" spacing="6" childForceExpandWidth="false">')
     add('<Text flexibleWidth="1"' .. NOClick .. '> </Text>')
