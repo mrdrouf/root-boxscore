@@ -2311,6 +2311,12 @@ function asciiOnly(str)
   return table.concat(out)
 end
 
+-- Element CONTENT only needs & < > handled; a double quote is ordinary text there. That is the
+-- entire reason for putting the payload between the tags rather than in text="...".
+function escInner(str)
+  return (tostring(str or ""):gsub("&", "+"):gsub("<", "&#60;"):gsub(">", "&#62;"))
+end
+
 function copyFieldText()
   local text = ""
   pcall(function() text = asciiOnly(JSON.encode(tournamentPayload())) end)
@@ -2706,7 +2712,7 @@ function rebuildUI()
     add('<VerticalLayout padding="12 12 10 8" spacing="5" childForceExpandHeight="false">')
     add('<Text fontSize="12" fontStyle="Bold" color="' .. PARCH .. '" preferredHeight="16"'
       .. ' alignment="MiddleLeft"' .. NOClick
-      .. '>the box-score record as JSON, " .. #copyFieldText() .. " chars &#8211; select all (Ctrl+A), copy (Ctrl+C) &#183; also in Notebook &#8594; &#8220;BoxScore JSON&#8221;</Text>')
+      .. '>the box-score record as JSON, ' .. #copyFieldText() .. ' chars &#8211; select all (Ctrl+A), copy (Ctrl+C) &#183; also in Notebook &#8594; &#8220;BoxScore JSON&#8221;</Text>')
     -- DOUBLE quotes, like every other element in this file -- this was the only one in 2900 lines
     -- built with single quotes, which TTS's XmlUI does not accept, so not even id="cpyfld" parsed
     -- and every setAttribute/setValue on it was a silent no-op.
@@ -2717,8 +2723,14 @@ function rebuildUI()
     -- contain no double quotes. A JSON payload is nothing but double quotes. So the element is
     -- emitted empty and the text is pushed in afterwards, which never had a chance before: with the
     -- id unparsed, the pushes had nothing to write to.
+    -- The JSON goes in as INNER TEXT, which is the one form not yet tried, and the evidence for it is
+    -- right above: the caption is a Text element carrying its content between the tags, and it has
+    -- rendered correctly in every screenshot. Element content is also where a double quote needs no
+    -- escaping at all -- it is only special inside an attribute -- which removes the whole problem
+    -- that killed the attribute route, since a JSON payload is nothing but double quotes.
     add('<InputField id="cpyfld" fontSize="10" preferredHeight="130" lineType="MultiLineNewLine"'
-      .. ' colors="#F1E5C8|#FFFFFF|#FFFFFF|#00000000" textColor="' .. INKTXT .. '" text=""/>')
+      .. ' colors="#F1E5C8|#FFFFFF|#FFFFFF|#00000000" textColor="' .. INKTXT .. '">'
+      .. escInner(copyFieldText()) .. '</InputField>')
     fillCopyField()
     add('<HorizontalLayout preferredHeight="26" spacing="6" childForceExpandWidth="false">')
     add('<Text flexibleWidth="1"' .. NOClick .. '> </Text>')

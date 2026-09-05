@@ -260,13 +260,16 @@ def t_copy_field_uses_double_quoted_attributes(src):
     placeholder, which is exactly what was reported three times.
     """
     import re as _re
-    i = src.index('id="cpyfld"')
-    decl = src[src.rindex("add(", 0, i):src.index("/>", i)]
+    # the MARKUP, not the comment above it that also mentions the id
+    i = src.index('<InputField id="cpyfld"')
+    decl = src[src.rindex("add(", 0, i):src.index("</InputField>", i) + len("</InputField>")]
     # a single-quoted ATTRIBUTE looks like name=' ; the Lua string literals' own quotes are fine
     bad = _re.findall(r"[a-zA-Z]+='", decl)
     assert not bad, "single-quoted attributes are back on the copy field: %s" % bad
-    assert 'text=""' in decl, \
-        "the JSON is in the XML attribute again -- esc() turns every quote into &#34;: %s" % decl[:160]
+    assert "text=" not in decl, \
+        "the JSON is in an attribute again -- a quote is special there, and JSON is all quotes: %s" % decl[:160]
+    assert "escInner(copyFieldText())" in decl, "the field is not carrying the JSON as inner text"
+    assert "</InputField>" in src, "the field is still self-closing, so it has no inner text"
 
     # and no element anywhere may drift back to single-quoted attributes
     everywhere = _re.findall(r"<[A-Za-z]+ [^>\n]*?[a-zA-Z]+='", src)
