@@ -1064,7 +1064,7 @@ local function unpickedList()
   return out
 end
 
--- The tournament site's schema (root_boxscore/EXPORT_SCHEMA.md). Every field in the developer's
+-- The tournament site's schema (root_boxscore/EXPORT_FIELDS.md). Every field in the developer's
 -- example is emitted, so the shape is always the same: the ones this object cannot know come out as
 -- null rather than being dropped, because a missing key and an unknown value are not the same thing
 -- to whoever ingests this. exportPayload below is a different, internal record and is left alone.
