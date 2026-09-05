@@ -1979,7 +1979,7 @@ function uiExport(player)
   local toDiscord = postDiscord(fencedChunks(boxText()))
   S.lastExport = os.date("%H:%M") .. " &#183; "
     .. (toDiscord and "sent to Discord"
-                   or ("no webhook &#8211; JSON in Notebook &#8220;" .. NOTEBOOK_TAB .. "&#8221;"))
+                   or ("no webhook &#8211; JSON in TTS Notebook &#8220;" .. NOTEBOOK_TAB .. "&#8221;"))
   dbg("BoxScore: exported " .. #json .. " chars" .. (toDiscord and " (discord)" or " (notebook)"))
   rebuildUI()
 end
@@ -2320,7 +2320,7 @@ local function renderMinRows()
   return math.max(1, n or 4)
 end
 
--- One notebook tab, rewritten on every export. TTS has no clipboard API and an InputField here
+-- One TTS Notebook tab, rewritten on every export. TTS has no clipboard API and an InputField here
 -- cannot be filled from script (measured: it renders a placeholder but never text set by the
 -- script, in any container, by any of attribute / inner text / setAttribute / setValue). The
 -- notebook body is a native text area that never touches the XML layer, so that is where the JSON
@@ -2707,7 +2707,7 @@ function rebuildUI()
     section("EDIT", 44,
       "Correct anything: scores (click a cell), the round (click a column number), whose turn it is (click a portrait), faction order (&#9650;), player names, the Eyrie commander / Knaves captains / vagabond character (&#9660;), map, deck, game name and the unpicked faction.")
     section("EXPORT", 44,
-      "Writes the game as JSON to the notebook tab &#8220;" .. NOTEBOOK_TAB .. "&#8221; &#8211; open the Notebook at the top of the screen, click that tab, Ctrl+A, Ctrl+C. Set a webhook under EDIT &#8594; DISCORD and the same record is posted there too; the footer then reads sent to Discord. One record either way, never two.")
+      "Writes the game as JSON to the TTS Notebook, tab &#8220;" .. NOTEBOOK_TAB .. "&#8221; &#8211; open the Notebook at the top of the screen, click that tab, Ctrl+A, Ctrl+C. Set a webhook under EDIT &#8594; DISCORD and the same record is posted there too; the footer then reads sent to Discord. One record either way, never two.")
     section("CRAFT", 44,
       "Watches the map's item supply. An item taken from it and placed by a faction's board is recorded as crafted that round, with its picture on the round's score cell. Returning an item to the supply cancels the craft. In EDIT, the ITEMS button corrects or adds crafts: click T# to pick the round, &#215; removes, + adds. Turning CRAFT off hides all crafts, exports included.")
     section("RESET", 16,
