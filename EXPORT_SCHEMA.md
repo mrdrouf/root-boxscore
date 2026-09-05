@@ -131,7 +131,8 @@ terminal. It is the same JSON either way.
 
 ## A generated, always-current template
 
-`EXPORT_TEMPLATE.json` beside this file is produced BY the exporter, not written by hand, so it is
+`EXPORT_TEMPLATE.json` (a four-player game, every feature exercised) and
+`EXPORT_EXAMPLE_2P.json` (a plain two-player game) beside this file are produced BY the exporter, not written by hand, so it is
 what the mod actually emits. Two notes for whoever consumes it:
 
 * **Key order is not significant.** Lua tables are unordered and `JSON.encode` emits them in

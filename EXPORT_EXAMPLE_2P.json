@@ -1,0 +1,53 @@
+{
+  "board_map": "autumn",
+  "deck": "base-deck",
+  "undrafted_faction": null,
+  "undrafted_vagabond": null,
+  "undrafted_captains": [],
+  "participants": [
+    {
+      "player": "mrdrouf",
+      "player_steam_id": "76561198012345678",
+      "coalition": null,
+      "faction": "marquise-de-cat",
+      "dominance": null,
+      "vagabond": null,
+      "captains": [],
+      "discarded_captain": null,
+      "starting_leader": null,
+      "brazen_demagogue": false,
+      "tournament_score": null,
+      "turn_order": 1,
+      "turns": [
+        { "turn": 1, "score": 4 },
+        { "turn": 2, "score": 9 },
+        { "turn": 3, "score": 15 },
+        { "turn": 4, "score": 21 },
+        { "turn": 5, "score": 27 },
+        { "turn": 6, "score": 30 }
+      ]
+    },
+    {
+      "player": "mrmirz",
+      "player_steam_id": "76561198087654321",
+      "coalition": null,
+      "faction": "eyrie-dynasties",
+      "dominance": null,
+      "vagabond": null,
+      "captains": [],
+      "discarded_captain": null,
+      "starting_leader": "Commander",
+      "brazen_demagogue": false,
+      "tournament_score": null,
+      "turn_order": 2,
+      "turns": [
+        { "turn": 1, "score": 2 },
+        { "turn": 2, "score": 6 },
+        { "turn": 3, "score": 11 },
+        { "turn": 4, "score": 14 },
+        { "turn": 5, "score": 19 },
+        { "turn": 6, "score": 22 }
+      ]
+    }
+  ]
+}
