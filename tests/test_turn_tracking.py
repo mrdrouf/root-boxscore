@@ -266,11 +266,10 @@ def t_copy_field_uses_double_quoted_attributes(src):
     # a single-quoted ATTRIBUTE looks like name=' ; the Lua string literals' own quotes are fine
     bad = _re.findall(r"[a-zA-Z]+='", decl)
     assert not bad, "single-quoted attributes are back on the copy field: %s" % bad
-    assert "text=" not in decl, \
-        "the JSON is in an attribute again -- a quote is special there, and JSON is all quotes: %s" % decl[:160]
-    assert "escInner(copyFieldText())" in decl, "the field is not carrying the JSON as inner text"
-    assert '"> ' in decl, "the leading space is gone -- it is what sidesteps the opening-brace bug"
-    assert "</InputField>" in src, "the field is still self-closing, so it has no inner text"
+    assert "esc(copyFieldText())" in decl, \
+        "the field is not carrying the JSON in the text attribute: %s" % decl[:200]
+    # inner text was MEASURED not to render: probe A carried plain text between the tags and was blank
+    assert "escInner(copyFieldText())" not in decl, "inner text is back, and it does not render"
 
     # and no element anywhere may drift back to single-quoted attributes
     everywhere = _re.findall(r"<[A-Za-z]+ [^>\n]*?[a-zA-Z]+='", src)

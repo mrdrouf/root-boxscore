@@ -2720,7 +2720,7 @@ function rebuildUI()
     add('<VerticalLayout padding="12 12 10 8" spacing="5" childForceExpandHeight="false">')
     add('<Text fontSize="12" fontStyle="Bold" color="' .. PARCH .. '" preferredHeight="16"'
       .. ' alignment="MiddleLeft"' .. NOClick
-      .. '>JSON, ' .. #copyFieldText() .. ' chars &#183; A/B/C below are a one-off test &#8211; tell me which of the three show text</Text>')
+      .. '>JSON, ' .. #copyFieldText() .. ' chars &#183; A/B/C/D below are a one-off test &#8211; which of the four show text?</Text>')
     -- DOUBLE quotes, like every other element in this file -- this was the only one in 2900 lines
     -- built with single quotes, which TTS's XmlUI does not accept, so not even id="cpyfld" parsed
     -- and every setAttribute/setValue on it was a silent no-op.
@@ -2736,32 +2736,31 @@ function rebuildUI()
     -- rendered correctly in every screenshot. Element content is also where a double quote needs no
     -- escaping at all -- it is only special inside an attribute -- which removes the whole problem
     -- that killed the attribute route, since a JSON payload is nothing but double quotes.
-    -- The payload goes in with a LEADING SPACE. nolt #1317 reports an InputField blanking when the
-    -- text is a JSON object -- a bare "{}" does it -- and if that is really keyed on the opening
-    -- brace then a space in front sidesteps it. Leading whitespace is valid JSON, so what gets
-    -- copied still parses anywhere.
+    -- MEASURED 2026-09-05: inner text does NOT populate an InputField. Probe A carried plain
+    -- "PLAIN-TEXT-CONTROL" between the tags and came up blank alongside the JSON probes, so the
+    -- documented <InputField>Default Text</InputField> form simply does not render here. Back to the
+    -- text ATTRIBUTE, which is the form every WORKING field in this file uses (player names, webhook,
+    -- thread) and which the docs also list.
     add('<InputField id="cpyfld" fontSize="10" preferredHeight="104" lineType="MultiLineNewLine"'
-      .. ' colors="#F1E5C8|#FFFFFF|#FFFFFF|#00000000" textColor="' .. INKTXT .. '"> '
-      .. escInner(copyFieldText()) .. '</InputField>')
+      .. ' colors="#F1E5C8|#FFFFFF|#FFFFFF|#00000000" textColor="' .. INKTXT .. '"'
+      .. ' text="' .. esc(copyFieldText()) .. '"/>')
 
-    -- DIAGNOSTIC ROW. Four attempts have now been shipped blind because there is no way to run TTS
-    -- from here; this replaces the guessing with one controlled test. Each probe is the SAME element
-    -- as above carrying a different string, so one screenshot says exactly which forms display:
-    --   A shows, B blank            -> the opening brace is the trigger (nolt #1317), C proves the fix
-    --   A blank                     -> an InputField cannot take inner text at all; use the notebook
-    --   all show, real payload blank-> it is the payload's size or content, not the mechanism
+    -- ROUND 2 of the probes, now on the attribute path, isolating one variable each. Entities are
+    -- documented as decoding correctly in attributes (unlike inner text), so B is the real question:
+    -- a JSON payload is nothing but escaped quotes.
     local function probe(id, label, body)
       add('<HorizontalLayout preferredHeight="22" spacing="4">')
       add('<Text fontSize="10" color="' .. PARCH .. '" preferredWidth="150" alignment="MiddleRight"'
         .. NOClick .. '>' .. label .. '</Text>')
       add('<InputField id="' .. id .. '" fontSize="10" flexibleWidth="1"'
-        .. ' colors="#F1E5C8|#FFFFFF|#FFFFFF|#00000000" textColor="' .. INKTXT .. '">'
-        .. body .. '</InputField>')
+        .. ' colors="#F1E5C8|#FFFFFF|#FFFFFF|#00000000" textColor="' .. INKTXT .. '"'
+        .. ' text="' .. body .. '"/>')
       add('</HorizontalLayout>')
     end
-    probe("dbgA", "A plain text",        "PLAIN-TEXT-CONTROL")
-    probe("dbgB", "B json, leading {",   '{"a":1}')
-    probe("dbgC", "C json, leading sp",  ' {"a":1}')
+    probe("dbgA", "A attr, plain",      "PLAIN-ATTR-CONTROL")
+    probe("dbgB", "B attr, one quote",  "a&#34;b")
+    probe("dbgC", "C attr, json",       "{&#34;a&#34;:1}")
+    probe("dbgD", "D attr, json+space", " {&#34;a&#34;:1}")
     fillCopyField()
     add('<HorizontalLayout preferredHeight="26" spacing="6" childForceExpandWidth="false">')
     add('<Text flexibleWidth="1"' .. NOClick .. '> </Text>')
