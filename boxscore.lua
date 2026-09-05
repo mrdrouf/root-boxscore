@@ -1993,9 +1993,8 @@ function uiExport(player)
   local json = exportJson()
   writeExportNotebook(json)
   local toDiscord = postDiscord(fencedChunks(boxText()))
-  S.lastExport = os.date("%H:%M") .. " &#183; "
-    .. (toDiscord and "sent to Discord"
-                   or ("no webhook &#8211; JSON in TTS Notebook &#8220;" .. NOTEBOOK_TAB .. "&#8221;"))
+  S.lastExport = (toDiscord and "exported &#183; sent to Discord"
+                             or ("exported &#183; JSON in TTS Notebook &#8220;" .. NOTEBOOK_TAB .. "&#8221;"))
   dbg("BoxScore: exported " .. #json .. " chars" .. (toDiscord and " (discord)" or " (notebook)"))
   rebuildUI()
 end
@@ -2635,12 +2634,15 @@ function rebuildUI()
   add('<Button fontSize="12" fontStyle="Bold" preferredWidth="66" ' .. BTN_SOFT .. ' text="EXPORT" onClick="uiExport"/>')
   add('<Button fontSize="12" fontStyle="Bold" preferredWidth="56" ' .. (S.setup and BTN_GOLD or BTN_SOFT)
     .. ' text="' .. (S.setup and "DONE" or "EDIT") .. '" onClick="uiSetup"/>')
+  -- the export result sits immediately LEFT of INFO and in bold: it is a reaction to pressing the
+  -- button, so it belongs beside the buttons, not lost in the credit line on the far right
+  if S.lastExport ~= "" then
+    add('<Text fontSize="12" fontStyle="Bold" color="' .. RUST .. '" alignment="MiddleRight"'
+      .. ' flexibleWidth="1"' .. NOClick .. '>' .. S.lastExport .. '&#160;&#160;</Text>')
+  end
   add('<Button fontSize="12" fontStyle="Bold" preferredWidth="52" '
     .. ((S.overlay == "info") and BTN_GOLD or BTN_SOFT) .. ' text="INFO" onClick="uiInfo"/>')
   local right = "made by MrDrouf&#160;&#160;&#183;&#160;&#160;" .. BUILD
-  if S.lastExport ~= "" then
-    right = "exported " .. S.lastExport .. "&#160;&#160;&#183;&#160;&#160;" .. right
-  end
   add('<Text fontSize="12" fontStyle="Italic" color="' .. RUST .. '" alignment="MiddleRight" flexibleWidth="1"' .. NOClick .. '>'
     .. right .. '</Text>')
   add('</HorizontalLayout>')
