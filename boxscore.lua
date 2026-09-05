@@ -149,6 +149,16 @@ local S = {
                     --   dom={turn,round,suit,score,won,kind,frozen,markerGuid} }
   active    = 1,
   turns     = 0,
+  -- THE ROUND, declared rather than divided out. It used to be computed everywhere as
+  -- floor(S.turns / #S.rows) + 1, which makes the CURRENT row count a divisor of the WHOLE history:
+  -- a row appearing or disappearing mid-game retroactively re-maps every past and future lock, so a
+  -- column comes out blank or two rounds show the same numbers. The same formula also assumes
+  -- "locks per round == #S.rows", which is false the moment one seat's colour never gets a turn --
+  -- then every round after it lags a column behind for the rest of the game. Both of the reported
+  -- box-score symptoms ("it skipped or omitted a number", "it tracked things weirdly") come out of
+  -- that one expression. The round now only ever moves when a row that has ALREADY locked this round
+  -- locks again, which is the actual definition of the table having come round.
+  round     = 1,
   -- One-shot latch: until a turn is actually recorded the pointer is held on
   -- the FIRST SEAT. Cleared by the first lock or by any explicit pointer move
   -- (row select / undo), never re-armed mid-game. Persisted with the rest of S,
@@ -172,6 +182,13 @@ local S = {
   log       = {},
   undo      = {},   -- faction NAMES (row order can change underneath)
 }
+
+-- ONE reader for the round, so no caller can invent its own definition again.
+local function currentRound()
+  local r = math.floor(tonumber(S.round) or 1)
+  if r < 1 then r = 1 end
+  return r
+end
 
 local TRACK = nil
 local lastTrackLogged = nil
@@ -524,7 +541,7 @@ local function registerDominance(row, state)
   if row == nil or row.dom ~= nil or not DOM_SUITS[suit] then return false end
   local brazen = (state.trackCount or 0) > 0
   row.dom = { turn = currentTurnNumber(),
-    round = math.max(1, math.floor(S.turns / math.max(1, #S.rows)) + 1),
+    round = currentRound(),
     suit = suit, score = row.score, won = false,
     kind = brazen and "brazen_demagogue" or "standard",
     frozen = not brazen,
@@ -778,10 +795,68 @@ local PLAYER_COLORS = {
   "Green", "Teal", "Blue", "Purple", "Pink",
 }
 
+-- ==== RTT'S SEAT RECORD ====================================================
+-- RTT keeps ONE record of who sits where, in what colour, playing what, and PUSHES it here whenever
+-- it changes -- seating, a faction placed, a colour change. It arrives as a JSON string (raw Lua
+-- tables do not cross object-script boundaries) and is kept in S, so onSave carries it through a
+-- reload and a crash.
+--
+-- This replaces re-reading three TTS Globals every six seconds. Globals are WIPED on load, so after a
+-- reload the sheet silently fell back to guessing each row's colour from the nearest hand zone --
+-- rows re-tinted to colours nobody occupies, and turns attributed to the wrong row. The pushed record
+-- survives, so there is nothing to fall back to.
+--
+-- The Globals are still read, but only as a fallback: an older RTT bake that does not push, or a
+-- plain Root table with no RTT at all, where the geometric pass is the only thing there is.
+-- Declared HERE, above its only writer and its only reader. `dirty` is a local several hundred lines
+-- below; assigning to it from up here would silently compile to a GLOBAL and never reach the poll --
+-- the same "local declared after use" trap that has already broken this file twice.
+local seatPushPending = false
+
+function rttSeatPush(enc)
+  local ok, d = pcall(function() return JSON.decode(enc) end)
+  if not ok or type(d) ~= "table" or type(d.seats) ~= "table" then return end
+  S.rttSeats = d
+  seatPushPending = true          -- picked up on the very next poll tick, not up to six seconds later
+end
+
+-- The record, from wherever it can be had: what was pushed to us first, then RTT's mirror Global.
+local function rttRecord()
+  if type(S.rttSeats) == "table" and type(S.rttSeats.seats) == "table"
+     and #S.rttSeats.seats > 0 then return S.rttSeats end
+  local ok, raw = pcall(function() return Global.getVar("RTT_SEAT_RECORD") end)
+  if ok and type(raw) == "string" and raw ~= "" then
+    local ok2, d = pcall(function() return JSON.decode(raw) end)
+    if ok2 and type(d) == "table" and type(d.seats) == "table" and #d.seats > 0 then
+      S.rttSeats = d
+      return d
+    end
+  end
+  return nil
+end
+
+-- faction -> field, straight off the record.
+local function rttFieldMap(field)
+  local rec = rttRecord()
+  if rec == nil then return nil end
+  local m, any = {}, false
+  for _, e in ipairs(rec.seats) do
+    if type(e) == "table" and e.faction ~= nil and e.faction ~= ""
+       and e[field] ~= nil and e[field] ~= "" then
+      m[e.faction] = e[field]; any = true
+    end
+  end
+  if not any then return nil end
+  return m
+end
+
 -- RTT publishes each faction's exact seat position (faction id -> {x,z}) via
 -- Global "RTT_SEAT_POS" as factions are placed. It stays a JSON string because
 -- raw Lua tables cannot cross object-script boundaries.
 local function rttSeatPosMap()
+  -- The pushed record first; the Global is only RTT's mirror of it, and mirrors are wiped on load.
+  local m = rttFieldMap("pos")
+  if m ~= nil then return m end
   local ok, raw = pcall(function() return Global.getVar("RTT_SEAT_POS") end)
   if ok and type(raw) == "string" and raw ~= "" then
     local ok2, m = pcall(function() return JSON.decode(raw) end)
@@ -795,6 +870,9 @@ end
 -- below: Player[c].getHandTransform() returns a position for EVERY colour, seated or not, so the guess
 -- happily binds rows to colours nobody occupies.
 local function rttSeatColorMap()
+  -- The pushed record first; the Global is only RTT's mirror of it, and mirrors are wiped on load.
+  local m = rttFieldMap("color")
+  if m ~= nil then return m end
   local ok, raw = pcall(function() return Global.getVar("RTT_SEAT_COLOR") end)
   if ok and type(raw) == "string" and raw ~= "" then
     local ok2, m = pcall(function() return JSON.decode(raw) end)
@@ -809,6 +887,9 @@ end
 -- colour against seated players finds nobody and the row shows no name. This is authoritative for the
 -- NAME; the colour still drives the turn order.
 local function rttSeatPlayerMap()
+  -- The pushed record first; the Global is only RTT's mirror of it, and mirrors are wiped on load.
+  local m = rttFieldMap("owner")
+  if m ~= nil then return m end
   local ok, raw = pcall(function() return Global.getVar("RTT_SEAT_PLAYER") end)
   if ok and type(raw) == "string" and raw ~= "" then
     local ok2, m = pcall(function() return JSON.decode(raw) end)
@@ -914,7 +995,11 @@ local function refreshSeats(byName)
   for _, row in ipairs(S.rows) do
     local c = assigned[row.fac]
     if c then
-      if row.color ~= c.color then row.color = c.color; changed = true end
+      -- colorAuto == false means a human set this row's colour deliberately; leave it alone, the same
+      -- way nameAuto / mapAuto / deckAuto / variantAuto protect every other hand-set field. Until this
+      -- existed, row.color was the ONE thing on the sheet that was rewritten every poll with no way to
+      -- correct it -- and it was the thing that was wrong.
+      if row.colorAuto ~= false and row.color ~= c.color then row.color = c.color; changed = true end
       local name = liveNames[c.color]
       local owned = rttOwner and (rttOwner[row.fac] or rttOwner[RTT_FACTION_ID[row.fac]])
       if owned ~= nil and owned ~= "" then name = owned end   -- RTT knows who picked it
@@ -922,7 +1007,7 @@ local function refreshSeats(byName)
         if row.player ~= name then row.player = name; changed = true end
         row.nameAuto = true
       end
-    elseif anchored[row.fac] and row.color ~= nil then
+    elseif anchored[row.fac] and row.color ~= nil and row.colorAuto ~= false then
       row.color = nil
       changed = true
     end
@@ -1509,7 +1594,7 @@ function uiCraftBtn(player, _, id)
     if row and nm then
       row.crafts = row.crafts or {}
       table.insert(row.crafts, { item = nm, img = S.itemImgs[nm] or "",
-        vp = 0, r = math.floor(S.turns / math.max(1, #S.rows)) + 1 })
+        vp = 0, r = currentRound() })
       logev("craft", row.fac, nm)
       S.craftAdd = nil
       refreshAssets()
@@ -1622,7 +1707,7 @@ local function poll()
       -- off 30 to a lower score means it was a mistake: the cell returns
       -- to exactly what it held before and play resumes.
       if S.winner == nil and sc >= 30 then
-        local r = math.max(1, math.floor(S.turns / math.max(1, #S.rows)) + 1)
+        local r = currentRound()
         S.winnerLock = { fac = row.fac, r = r,
           prevLock = row.locks[r], prevEdit = row.edits[tostring(r)] }
         row.edits[tostring(r)] = nil
@@ -1749,7 +1834,10 @@ local function poll()
     end
   end
 
-  if pollCount % 5 == 1 then
+  -- Normally the seat work is every 5th pass (~6s). A push from RTT is an EVENT, so it is taken on
+  -- the very next tick instead of waiting for the cycle to come round.
+  if pollCount % 5 == 1 or seatPushPending then
+    seatPushPending = false
     local byName = {}
     for _, o in ipairs(getAllObjects()) do
       byName[o.getName() or ""] = o
@@ -1810,13 +1898,20 @@ function lockRow(i)
   -- lands: the lock goes exactly there, overwriting whatever the cell
   -- holds (lock or hand edit). A wrong column is corrected by clicking
   -- the right column number in EDIT, never by the sheet second-guessing.
-  local r = math.max(1, math.floor(S.turns / math.max(1, #S.rows)) + 1)
+  -- THE WRAP, detected per row: being asked to lock a row that has already locked this round means
+  -- the table has come round, so the round advances. Nothing divides by #S.rows any more, so a row
+  -- joining or leaving mid-game cannot re-map anybody's columns, and a seat whose colour never gets a
+  -- turn no longer drags every other row a column to the left.
+  local prevRound, prevLast = currentRound(), row.lastRound
+  if (row.lastRound or 0) >= currentRound() then S.round = currentRound() + 1 end
+  local r = currentRound()
   row.edits[tostring(r)] = nil
   while #row.locks < r - 1 do
     table.insert(row.locks, -1)
   end
   row.locks[r] = row.score
-  table.insert(S.undo, { fac = row.fac, r = r })
+  row.lastRound = r
+  table.insert(S.undo, { fac = row.fac, r = r, prevRound = prevRound, prevLast = prevLast })
   logev("lock", row.fac, r, row.score)
   S.turns = S.turns + 1
   rebuildUI()
@@ -1945,6 +2040,14 @@ function uiUndo()
       table.remove(row.locks)
     end
     S.turns = math.max(0, S.turns - 1)
+    -- and the round bookkeeping this lock changed, so undoing the first lock of a round steps the
+    -- round back with it instead of leaving the sheet a column ahead of itself.
+    local u = S.undo[#S.undo]
+    if u ~= nil and u.fac == row.fac and u.r == col then
+      if u.prevRound ~= nil then S.round = u.prevRound end
+      row.lastRound = u.prevLast
+      table.remove(S.undo)
+    end
     S.pinFirst = false        -- undo positions the pointer deliberately
     if not fullTurnCoverage() then S.active = i end
     rebuildUI()
@@ -1967,6 +2070,7 @@ function uiReset()
   S.rows = {}
   S.active = 1
   S.turns = 0
+  S.round = 1
   S.pinFirst = true
   S.winner = nil
   S.winnerReason = nil
@@ -2196,9 +2300,14 @@ function uiRowBtn(player, _, id)
     rebuildUI()
   elseif kind == "colh" then
     -- clicking a round-column number in setup declares "we are in round i";
-    -- locks always land in the declared (highlighted) column
-    S.turns = (i - 1) * math.max(1, #S.rows)
-    logev("setturn", nil, S.turns)
+    -- locks always land in the declared (highlighted) column.
+    -- It used to say so by writing a FABRICATED turn count, (i-1) * #S.rows, which silently reset the
+    -- within-round position to zero: every row that had already played round i was then treated as
+    -- not having played it, so half the table's next lock landed in the round they had just finished.
+    -- Declaring the round now says exactly that and nothing else.
+    S.round = math.max(1, i)
+    for _, r in ipairs(S.rows) do r.lastRound = nil end
+    logev("setround", nil, S.round)
     rebuildUI()
   end
 end
@@ -2324,7 +2433,7 @@ function boxText()
       if rn and v ~= "" and rn > R then R = rn end
     end
   end
-  local round = math.floor(S.turns / math.max(1, #S.rows)) + 1
+  local round = currentRound()
   local title = "ROOT BOX SCORE"
   if S.meta.game ~= nil and S.meta.game ~= "" then
     title = title .. " - " .. S.meta.game
@@ -2521,7 +2630,7 @@ function rebuildUI()
   add('<Text preferredWidth="' .. facW .. '"' .. NOClick .. '> </Text>')
   add('<Text preferredWidth="' .. domW .. '"' .. NOClick .. '> </Text>')
   add('<Text preferredWidth="' .. nameW .. '"' .. NOClick .. '> </Text>')
-  local curRound = math.floor(S.turns / math.max(1, #S.rows)) + 1
+  local curRound = currentRound()
   for r = 1, showR - 1 do
     local isCur = (r == curRound)
     if S.setup then
@@ -2940,6 +3049,19 @@ function onSave()
   return JSON.encode(S)
 end
 
+-- Throw away everything known about seats and start again: the record RTT pushed, and every row's
+-- hand-set colour. The next poll re-reads RTT's record, or falls back to hand-zone geometry on a table
+-- with no RTT. This is the escape hatch for a sheet that has somehow ended up with the wrong rows --
+-- there is no per-row colour picker, because adding one costs 26px of sheet width and the slab size
+-- is pinned by the RTT bake.
+function uiReseat()
+  S.rttSeats = nil
+  for _, row in ipairs(S.rows) do row.colorAuto = nil; row.color = nil end
+  logev("reseat")
+  broadcastToAll("Box score: seats will be re-detected.", {0.9, 0.8, 0.5})
+  rebuildUI()
+end
+
 function onLoad(saved)
   local loadedState = false
   if saved ~= nil and saved ~= "" then
@@ -2968,6 +3090,22 @@ function onLoad(saved)
   S.experimental = S.experimental or false
   S.itemImgs = S.itemImgs or {}
   S.turns = S.turns or 0
+  -- A game saved before the round became explicit carries only S.turns and the locks. Recover the
+  -- round from the locks themselves -- the highest column anybody actually filled -- rather than from
+  -- the old division, which is the thing that was wrong. Each row's lastRound is seeded the same way,
+  -- so a resumed game keeps locking exactly where it left off.
+  if S.round == nil then
+    local maxr = 0
+    for _, row in ipairs(S.rows or {}) do
+      local last = 0
+      for r = 1, #(row.locks or {}) do
+        if row.locks[r] ~= nil and row.locks[r] ~= -1 then last = r end
+      end
+      row.lastRound = (last > 0) and last or nil
+      if last > maxr then maxr = last end
+    end
+    S.round = math.max(1, maxr)
+  end
   S.active = S.active or 1
   if S.active > math.max(1, #S.rows) then S.active = 1 end
   local domWinner = nil
@@ -3029,6 +3167,7 @@ function onLoad(saved)
   self.addContextMenuItem("size -10%", uiSizeDown, false)
   self.addContextMenuItem("panel scale mode", uiScaleMode, false)
   self.addContextMenuItem("diagnose", uiDiag, false)
+  self.addContextMenuItem("re-detect seats", uiReseat, false)
 
   Wait.time(function()
     findTrack()

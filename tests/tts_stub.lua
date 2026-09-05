@@ -98,7 +98,89 @@ local function _enc(v)
   end
   return "null"
 end
-_G.JSON = { encode=_enc, decode=function(s) return nil end }
+-- A REAL decoder. This used to `return nil`, which quietly meant the box score's own onLoad could
+-- never restore state in a test -- `JSON.decode(saved)` gave nil, loadedState stayed false, and every
+-- assertion about surviving a reload was asserting nothing. Recursive descent, enough of JSON for
+-- what this file round-trips: objects, arrays, strings with escapes, numbers, true/false/null.
+local function _dec(str)
+  local i = 1
+  local function ws() while i <= #str and str:sub(i,i):match("%s") do i = i + 1 end end
+  local val
+  local function err(m) error(("JSON at %d: %s"):format(i, m), 0) end
+  local function str_()
+    i = i + 1                                   -- opening quote
+    local out = {}
+    while true do
+      if i > #str then err("unterminated string") end
+      local c = str:sub(i,i)
+      if c == '"' then i = i + 1 break end
+      if c == "\\" then
+        local e = str:sub(i+1,i+1)
+        local map = { n="\n", t="\t", r="\r", b="\b", f="\f", ['"']='"', ["\\"]="\\", ["/"]="/" }
+        if map[e] then out[#out+1] = map[e]; i = i + 2
+        elseif e == "u" then
+          local hex = tonumber(str:sub(i+2,i+5), 16) or 63
+          out[#out+1] = (hex < 128) and string.char(hex) or "?"
+          i = i + 6
+        else err("bad escape " .. tostring(e)) end
+      else out[#out+1] = c; i = i + 1 end
+    end
+    return table.concat(out)
+  end
+  local function num()
+    local s2 = str:match("^-?%d+%.?%d*[eE]?[-+]?%d*", i)
+    if s2 == nil or s2 == "" then err("bad number") end
+    i = i + #s2
+    return tonumber(s2)
+  end
+  val = function()
+    ws()
+    local c = str:sub(i,i)
+    if c == "{" then
+      i = i + 1
+      local t = {}
+      ws()
+      if str:sub(i,i) == "}" then i = i + 1 return t end
+      while true do
+        ws()
+        if str:sub(i,i) ~= '"' then err("object key") end
+        local k = str_()
+        ws()
+        if str:sub(i,i) ~= ":" then err("expected :") end
+        i = i + 1
+        t[k] = val()
+        ws()
+        local d = str:sub(i,i)
+        i = i + 1
+        if d == "}" then return t end
+        if d ~= "," then err("expected , or }") end
+      end
+    elseif c == "[" then
+      i = i + 1
+      local t, n = {}, 0
+      ws()
+      if str:sub(i,i) == "]" then i = i + 1 return t end
+      while true do
+        n = n + 1
+        t[n] = val()
+        ws()
+        local d = str:sub(i,i)
+        i = i + 1
+        if d == "]" then return t end
+        if d ~= "," then err("expected , or ]") end
+      end
+    elseif c == '"' then return str_()
+    elseif str:sub(i,i+3) == "true"  then i = i + 4 return true
+    elseif str:sub(i,i+4) == "false" then i = i + 5 return false
+    elseif str:sub(i,i+3) == "null"  then i = i + 4 return nil
+    else return num() end
+  end
+  local ok, out = pcall(val)
+  if not ok then return nil end
+  return out
+end
+
+_G.JSON = { encode=_enc, decode=_dec }
 _G.WebRequest = { post=function() end, get=function() end }
 -- A working notebook, so the export/copy paths can be read back
 local _tabs = {}

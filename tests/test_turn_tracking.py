@@ -34,6 +34,22 @@ function __row(i)
   return { fac = r.fac, color = tostring(r.color), locks = n }
 end
 function __poll() poll() end
+function __round() return S.round end
+function __locks(i)
+  local r = S.rows[i]; if r == nil then return "" end
+  local out = {}
+  for k = 1, 12 do out[#out+1] = tostring(r.locks[k] == nil and "." or r.locks[k]) end
+  return table.concat(out, ",")
+end
+function __colorof(fac)
+  for _, r in ipairs(S.rows) do if r.fac == fac then return tostring(r.color) end end
+  return "?"
+end
+function __locksby(c)
+  for i, r in ipairs(S.rows) do if tostring(r.color) == c then return __locks(i) end end
+  return "?"
+end
+function __save() return onSave() end
 '''
 
 
@@ -425,6 +441,202 @@ def t_turns_enabled_after_the_sheet_is_already_up(src):
     assert locks == 4, "a full round locked %d scores, expected 4" % locks
 
 
+def _table(src, factions, seated_colors, order):
+    """A live sheet with the turn system running, ready to be poked at."""
+    rt = lupa.LuaRuntime(unpack_returned_tuples=True)
+    rt.execute(open(os.path.join(HERE, "tts_stub.lua"), encoding="utf-8").read())
+    rt.execute(src + PROBE)
+    rt.execute(build_setup(factions, seated_colors))
+    rt.globals().onLoad("")
+    rt.globals().__H.flush(20)
+    for _ in range(6):
+        rt.globals().__poll(); rt.globals().__H.flush(3)
+    rt.execute('Turns.type = 2; Turns.skip_empty_hands = false; Turns.order = {%s}; '
+               'Turns.turn_color = "%s"; Turns.enable = true'
+               % (", ".join('"%s"' % c for c in order), order[0]))
+    for _ in range(4):
+        rt.globals().__poll(); rt.globals().__H.flush(3)
+    return rt
+
+
+def _pass(rt, nxt, prev, seated):
+    rt.globals().onPlayerTurn(rt.table(color=nxt, seated=nxt in seated),
+                              rt.table(color=prev, seated=prev in seated))
+    rt.globals().__H.flush(3); rt.globals().__poll(); rt.globals().__H.flush(3)
+
+
+def _lua_str(x):
+    return "[==[" + x + "]==]"
+
+
+def _setscore(rt, fac, score):
+    """Move a faction's VP marker to `score`.
+
+    Every score in this fixture used to be 0, which made a lock landing in the WRONG column
+    invisible: overwriting a 0 with a 0 looks like nothing happened. Distinct scores per round are
+    what let these tests see a misplaced lock at all.
+    Printed 0 sits at the track's maximum local x, and the 31 snaps are 0.03 apart.
+    """
+    rt.execute('local o = getObjectFromGUID("vp_%s") o._pos = {x=%.4f, y=0, z=0.0}'
+               % (fac, (30 - score) * 0.03))
+    rt.globals().__poll(); rt.globals().__H.flush(3)
+
+
+def t_a_row_appearing_midgame_does_not_remap_columns(src):
+    """The round must not be a division by the CURRENT row count.
+
+    It was `floor(S.turns / #S.rows) + 1`, which makes the live row count a divisor of the whole
+    history: a faction joining the table mid-game retroactively re-maps every future lock. After two
+    rounds of three (6 turns) a fourth row appears, and the old formula gives floor(6/4)+1 = 2 -- so
+    round three's locks landed back in round TWO's column, overwriting it. That is the tester's
+    "it skipped or omitted a number".
+    """
+    facs, seated = list(FACTIONS[:3]), ["Red", "Yellow", "Orange"]
+    order = ["Red", "Yellow", "Orange"]
+    rt = _table(src, facs, seated, order)
+    for nxt, prev in cycle(order, 6):                     # two clean rounds of three
+        _pass(rt, nxt, prev, seated)
+    for i in (1, 2, 3):
+        cols = rt.eval("__locks(%d)" % i).split(",")
+        assert cols[0] != "." and cols[1] != ".", "row %d did not fill rounds 1-2: %s" % (i, cols[:3])
+
+    # a fourth faction lands on the table and gets a row
+    rt.execute('local o = __H.obj("Duchy VP","vp_Duchy",{x=0.90,y=0,z=0.0}) '
+               'o.held_by_color = nil o.isSmoothMoving = function() return false end '
+               '__H.obj("Duchy Supply","sup_Duchy",{x=50,y=0,z=50})')
+    for _ in range(6):
+        rt.globals().__poll(); rt.globals().__H.flush(3)
+    assert dict(rt.eval("__probe()"))["rows"] == 4, "the fourth row never appeared"
+
+    before = [rt.eval("__locks(%d)" % i) for i in (1, 2, 3)]
+    for nxt, prev in cycle(order, 3):                     # round three, for the original three
+        _pass(rt, nxt, prev, seated)
+    after = [rt.eval("__locks(%d)" % i) for i in (1, 2, 3)]
+    for i, (b, a) in enumerate(zip(before, after)):
+        assert b.split(",")[:2] == a.split(",")[:2], (
+            "row %d: the fourth row joining rewrote rounds 1-2, %s -> %s"
+            % (i + 1, b.split(",")[:3], a.split(",")[:3]))
+        assert a.split(",")[2] != ".", (
+            "row %d never locked round 3 -- its turn landed back in an earlier column: %s"
+            % (i + 1, a.split(",")[:4]))
+
+
+def t_declaring_the_round_does_not_shift_half_the_table(src):
+    """EDIT's round-number button declares the round, and that is ALL it does.
+
+    The sheet's stated contract is that the highlighted column is the single truth for where a lock
+    lands, so declaring round i means the next go-round fills column i -- deliberately overwriting it.
+    What must NOT happen is the declaration leaving the table in two states at once, with some rows
+    a round ahead of others.
+
+    It used to say "we are in round i" by writing a FABRICATED turn count, (i-1) * #S.rows. That
+    made the declaration depend on the live row count and silently reset the within-round position,
+    and it corrupted S.turns, which the first-player latch and the export both read. The round is now
+    a stored field and the turn count is left alone.
+    """
+    facs, seated = list(FACTIONS), ["Red", "Yellow", "Orange", "Teal"]
+    order = ["Red", "Yellow", "Orange", "Teal"]
+    rt = _table(src, facs, seated, order)
+    _setscore(rt, "Marquise", 1)
+    for nxt, prev in cycle(order, 4):                     # round 1
+        _pass(rt, nxt, prev, seated)
+    turns_before = dict(rt.eval("__probe()"))["turns"]
+    rt.execute('uiRowBtn(nil, nil, "colh_2")')            # declare round 2
+
+    _setscore(rt, "Marquise", 5)
+    for nxt, prev in cycle(order, 4):                     # the whole table plays round 2
+        _pass(rt, nxt, prev, seated)
+    red = rt.eval('__locksby("Red")').split(",")
+    assert red[0] == "1", "declaring the round corrupted round 1: %s" % red[:4]
+    assert red[1] == "5", "round 2 did not land in column 2: %s" % red[:4]
+    assert red[2] == ".", "a row ran a round ahead of the declaration: %s" % red[:4]
+
+    _setscore(rt, "Marquise", 9)
+    for nxt, prev in cycle(order, 4):                     # and the next cycle advances by exactly one
+        _pass(rt, nxt, prev, seated)
+    red = rt.eval('__locksby("Red")').split(",")
+    assert red[:4] == ["1", "5", "9", "."], "the round did not advance by exactly one: %s" % red[:4]
+    # every row is in the same round: no half-table split
+    for c in ("Red", "Yellow", "Orange", "Teal"):
+        cols = rt.eval('__locksby("%s")' % c).split(",")
+        filled = len([x for x in cols[:6] if x != "."])
+        assert filled == 3, "%s has %d rounds recorded, the rest have 3: %s" % (c, filled, cols[:5])
+    assert dict(rt.eval("__probe()"))["turns"] > turns_before, \
+        "declaring a round rewound the turn count, which the first-player latch and the export read"
+
+
+def t_the_pushed_seat_record_wins_and_survives_a_reload(src):
+    """RTT pushes the seat record; the sheet keeps it, and keeps it through a reload.
+
+    It used to re-read three TTS Globals every six seconds. Globals are WIPED on load, so a resumed
+    game silently fell back to guessing each row's colour from the nearest hand zone -- rows re-tinted
+    to colours nobody occupies, and turns attributed to the wrong row.
+    """
+    facs, seated = list(FACTIONS), ["Red", "Yellow", "Orange", "Teal"]
+    want = [("Purple", "Marquise de Cat"), ("Blue", "Eyrie Dynasties"),
+            ("White", "Woodland Alliance"), ("Pink", "Underground Duchy")]
+    rt = _table(src, facs, seated, ["Red", "Yellow", "Orange", "Teal"])
+    rec = '{"run":7,"seats":[' + ",".join(
+        '{"pos":[0,0],"color":"%s","faction":"%s","owner":"H%d"}' % (c, f, i)
+        for i, (c, f) in enumerate(want)) + ']}'
+    rt.execute("rttSeatPush(%s)" % _lua_str(rec))
+    for _ in range(3):
+        rt.globals().__poll(); rt.globals().__H.flush(3)
+    for fac, w in zip(("Marquise", "Eyrie", "Alliance", "Duchy"), [c for c, _ in want]):
+        got = rt.eval('__colorof("%s")' % fac)
+        assert got == w, "%s bound to %s, RTT said %s" % (fac, got, w)
+
+    saved = rt.eval("__save()")
+    assert saved and saved != "", "onSave produced nothing"
+    rt2 = lupa.LuaRuntime(unpack_returned_tuples=True)
+    rt2.execute(open(os.path.join(HERE, "tts_stub.lua"), encoding="utf-8").read())
+    rt2.execute(src + PROBE)
+    rt2.execute(build_setup(facs, seated))               # a fresh table: the Globals are gone
+    rt2.globals().onLoad(saved)
+    rt2.globals().__H.flush(20)
+    for _ in range(8):
+        rt2.globals().__poll(); rt2.globals().__H.flush(3)
+    for fac, w in (("Marquise", "Purple"), ("Duchy", "Pink")):
+        got = rt2.eval('__colorof("%s")' % fac)
+        assert got == w, "after reload %s came back as %s, not %s" % (fac, got, w)
+
+
+def t_old_save_migrates_to_the_explicit_round(src):
+    """A game saved before the round became explicit must resume where its locks say it is.
+
+    This one guards the MIGRATION, not an old bug: the previous code happened to get a resumed game
+    right whenever the row count had not changed, and this keeps that true now that the round is a
+    stored field rather than a division. Strip the field, reload, and the next turn must still land
+    in round 3.
+    """
+    facs, seated = list(FACTIONS[:3]), ["Red", "Yellow", "Orange"]
+    order = ["Red", "Yellow", "Orange"]
+    rt = _table(src, facs, seated, order)
+    for nxt, prev in cycle(order, 6):
+        _pass(rt, nxt, prev, seated)
+    saved = rt.eval("__save()")
+    saved_old = saved.replace('"round":2,', "").replace(',"round":2', "")
+    assert '"round"' not in saved_old, "the fixture did not actually strip the round"
+
+    rt2 = lupa.LuaRuntime(unpack_returned_tuples=True)
+    rt2.execute(open(os.path.join(HERE, "tts_stub.lua"), encoding="utf-8").read())
+    rt2.execute(src + PROBE)
+    rt2.execute(build_setup(facs, seated))
+    rt2.globals().onLoad(saved_old)
+    rt2.globals().__H.flush(20)
+    for _ in range(6):
+        rt2.globals().__poll(); rt2.globals().__H.flush(3)
+    rt2.execute('Turns.type = 2; Turns.skip_empty_hands = false; '
+                'Turns.order = {"Red","Yellow","Orange"}; Turns.turn_color = "Red"; Turns.enable = true')
+    for _ in range(4):
+        rt2.globals().__poll(); rt2.globals().__H.flush(3)
+    _pass(rt2, "Yellow", "Red", seated)                   # the resumed game's next turn
+    cols = rt2.eval('__locksby("Red")').split(",")
+    assert cols[0] != "." and cols[1] != ".", "the resumed game lost its first two rounds: %s" % cols[:4]
+    assert cols[2] != ".", (
+        "a resumed game locked into a finished column instead of round 3: %s" % cols[:4])
+
+
 DIRECT += [("turns switched on after setup",  t_turns_enabled_after_the_sheet_is_already_up),
            ("export emits the full schema",   t_export_emits_the_full_schema),
            ("one record, one notebook tab",    t_export_is_one_record_to_one_tab),
@@ -433,7 +645,11 @@ DIRECT += [("turns switched on after setup",  t_turns_enabled_after_the_sheet_is
            ("coalition shares the win",        t_coalition_shares_the_win),
            ("coalition candidates by rule",    t_coalition_candidates_follow_the_rule),
            ("steam id read from the seat",     t_steam_id_is_read_from_the_seat),
-           ("export payload is pure ascii",    t_export_is_pure_ascii)]
+           ("export payload is pure ascii",    t_export_is_pure_ascii),
+           ("row joining does not remap",      t_a_row_appearing_midgame_does_not_remap_columns),
+           ("declaring a round shifts nobody", t_declaring_the_round_does_not_shift_half_the_table),
+           ("pushed record wins and persists", t_the_pushed_seat_record_wins_and_survives_a_reload),
+           ("old save migrates its round",     t_old_save_migrates_to_the_explicit_round)]
 
 
 CASES = [
