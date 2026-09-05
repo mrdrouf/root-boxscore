@@ -1090,7 +1090,7 @@ end
 -- The tournament site's schema (root_boxscore/EXPORT_FIELDS.md). Every field in the developer's
 -- example is emitted, so the shape is always the same: the ones this object cannot know come out as
 -- null rather than being dropped, because a missing key and an unknown value are not the same thing
--- to whoever ingests this. exportPayload below is a different, internal record and is left alone.
+-- to whoever ingests this.
 local FACTION_SLUG = {
   Marquise = "marquise-de-cat",   Eyrie    = "eyrie-dynasties",  Alliance = "woodland-alliance",
   Vagabond = "vagabond",          Riverfolk= "riverfolk-company", Lizard  = "lizard-cult",
@@ -1234,22 +1234,6 @@ function exportJson()
       :gsub('"' .. JLIST .. '"', "[]")
   end)
   return text
-end
-
-local function exportPayload(kind, extra)
-  local p = { type = kind, t = now(), meta = S.meta, turns = S.turns,
-              turnOrder = Turns.order, unpicked = unpickedList(),
-              unpickedVariants = S.unpickedVar, rows = {} }
-  for _, row in ipairs(S.rows) do
-    table.insert(p.rows, { faction = row.fac, player = row.player,
-      variant = row.variant, color = row.color, score = row.score,
-      locks = row.locks, edits = row.edits, crafts = row.crafts,
-      dominance = row.dom })
-  end
-  if extra ~= nil then
-    for k, v in pairs(extra) do p[k] = v end
-  end
-  return p
 end
 
 -- Post straight to a Discord webhook - no companion program needed. The URL

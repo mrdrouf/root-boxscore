@@ -384,7 +384,49 @@ def t_export_is_pure_ascii(src):
     assert _json.loads(got)["participants"][0]["player"] == "KRT\u2122McArthur"
 
 
-DIRECT += [("export emits the full schema",   t_export_emits_the_full_schema),
+def t_turns_enabled_after_the_sheet_is_already_up(src):
+    """RTT now leaves turns OFF at setup and switches them on when the first player sits.
+
+    The sheet therefore meets a table with Turns.enable false, falls back to manual mode, and must
+    pick the turn system up when it appears -- without losing rows, colours or scores. Before this
+    change the mod enabled turns during setup, so the sheet never saw that transition.
+    """
+    rt = lupa.LuaRuntime(unpack_returned_tuples=True)
+    rt.execute(open(os.path.join(HERE, "tts_stub.lua"), encoding="utf-8").read())
+    rt.execute(src + PROBE)
+    L, H = rt.globals(), rt.globals().__H
+    order = ["Red", "Yellow", "Orange", "Teal"]
+    rt.execute(build_setup(FACTIONS, order))
+    # turns configured but NOT enabled -- exactly what 4-Player Setup now leaves behind
+    rt.execute('Turns.type = 2; Turns.skip_empty_hands = false; '
+               'Turns.order = {"Red","Yellow","Orange","Teal"}; Turns.enable = false')
+    L.onLoad("")
+    H.flush(20)
+    for _ in range(6):
+        L.__poll(); H.flush(3)
+    before = dict(L.__probe())
+    assert before["rows"] == 4, "rows were lost while turns were off: %s" % before
+    assert before["coverage"] == 0, "coverage claimed with the turn system off"
+
+    # first player sits: RTT switches turns on with the order already in place
+    rt.execute('Turns.turn_color = "Red"; Turns.enable = true')
+    for _ in range(4):
+        L.__poll(); H.flush(3)
+    mid = dict(L.__probe())
+    assert mid["rows"] == 4, "rows lost when turns came on: %s" % mid
+    assert mid["coverage"] == 1, "the sheet did not pick the turn system up: %s" % mid
+
+    # and a full round now locks one score per faction
+    for nxt, prev in cycle(order, 4):
+        L.onPlayerTurn(rt.table(color=nxt, seated=True), rt.table(color=prev, seated=True))
+        H.flush(3); L.__poll(); H.flush(3)
+    locks = sum(dict(L.__row(i))["locks"] for i in range(1, 5) if L.__row(i))
+    assert dict(L.__probe())["turns"] == 4, "turn passes were not counted"
+    assert locks == 4, "a full round locked %d scores, expected 4" % locks
+
+
+DIRECT += [("turns switched on after setup",  t_turns_enabled_after_the_sheet_is_already_up),
+           ("export emits the full schema",   t_export_emits_the_full_schema),
            ("one record, one notebook tab",    t_export_is_one_record_to_one_tab),
            ("no COPY button or overlay",       t_no_copy_button_or_overlay),
            ("tournament score marks winner",   t_tournament_score_marks_the_winner),
