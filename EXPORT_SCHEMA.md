@@ -112,7 +112,8 @@ placeholders for that, since `JSON.encode` drops a nil and writes `{}` for an em
 | `board_map` | `S.meta.map` | auto-detected from the map's image URL (`MAP_NAMES`), slugified |
 | `deck` | `S.meta.deck` | auto-detected from the card-back art (`DECK_BACKS`); "and" is dropped, so "Squires and Disciples" -> `squires-disciples` |
 | `faction` | `row.fac` via `FACTION_SLUG` | the roster's short names map to the site's slugs (`Rats` -> `lord-of-the-hundreds`) |
-| `player` | `row.player` | `null` when blank |
+| `player` | `row.player` | the in-game/Steam display name; `null` when blank |
+| `player_steam_id` | `Player.steam_id` for the row's seat colour | stable and unique, so the site can map it to an account once; `null` unless that colour is seated at export time |
 | `turn_order` | row index | rows are ordered by physical seat |
 | `turns[]` | `row.locks` | one entry per locked round; `-1` (no score yet) is skipped |
 | `turns[].dominance` | `row.dom.round` | set from the round the dominance was taken onward |
@@ -127,6 +128,16 @@ placeholders for that, since `JSON.encode` drops a nil and writes `{}` for an em
 
 Non-ASCII is `\uXXXX`-escaped so the payload survives being pasted through Discord, a web form or a
 terminal. It is the same JSON either way.
+
+## A generated, always-current template
+
+`EXPORT_TEMPLATE.json` beside this file is produced BY the exporter, not written by hand, so it is
+what the mod actually emits. Two notes for whoever consumes it:
+
+* **Key order is not significant.** Lua tables are unordered and `JSON.encode` emits them in
+  arbitrary order; the template is sorted into a readable order for humans only.
+* **Every key is always present.** Anything the mod cannot know is `null` (or `[]`), never omitted,
+  so the shape does not change between games.
 
 ## Why the notebook, and not a text box on the sheet
 

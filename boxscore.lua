@@ -1114,6 +1114,21 @@ function asciiOnly(str)
   return table.concat(out)
 end
 
+-- A display name is a poor key: people rename themselves and it will not match a Discord handle.
+-- The Steam id is stable and unique, so the site can map it to an account once. Only available while
+-- that colour is actually seated, same as the name.
+local function steamIdFor(color)
+  if color == nil or color == "" then return nil end
+  local id = nil
+  pcall(function()
+    for _, pl in ipairs(Player.getPlayers()) do
+      if pl.seated and pl.color == color and pl.steam_id ~= nil then id = tostring(pl.steam_id) end
+    end
+  end)
+  if id == "" then return nil end
+  return id
+end
+
 function tournamentPayload()
   local p = {
     board_map          = S.meta.map  ~= "" and slug(S.meta.map)  or JNULL,
@@ -1134,6 +1149,7 @@ function tournamentPayload()
   for i, row in ipairs(S.rows) do
     local e = {
       player            = (row.player ~= nil and row.player ~= "") and row.player or JNULL,
+      player_steam_id   = steamIdFor(row.color) or JNULL,
       coalition         = JNULL,              -- not tracked
       faction           = FACTION_SLUG[row.fac] or slug(row.fac),
       dominance         = JNULL,

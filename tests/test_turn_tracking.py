@@ -233,13 +233,15 @@ def t_export_emits_the_full_schema(src):
     got = {e["faction"]: e for e in p["participants"]}
     assert set(got) == {"woodland-alliance", "lord-of-the-hundreds", "vagabond", "eyrie-dynasties"}
 
-    FIELDS = {"player", "coalition", "faction", "dominance", "vagabond", "captains",
-              "discarded_captain", "starting_leader", "brazen_demagogue", "tournament_score",
-              "turn_order", "turns"}
+    FIELDS = {"player", "player_steam_id", "coalition", "faction", "dominance", "vagabond",
+              "captains", "discarded_captain", "starting_leader", "brazen_demagogue",
+              "tournament_score", "turn_order", "turns"}
     for fac, e in got.items():
         assert set(e) == FIELDS, "%s has %s" % (fac, sorted(set(e) ^ FIELDS))
         assert e["captains"] == [], "captains must be [] for %s" % fac
         assert e["coalition"] is None and e["tournament_score"] is None
+        # nobody is seated in the fixture, so the id must be null rather than absent or ""
+        assert e["player_steam_id"] is None, "%s: %r" % (fac, e["player_steam_id"])
 
     a = got["woodland-alliance"]
     assert a["player"] == "mrdrouf" and a["turn_order"] == 1
@@ -283,6 +285,25 @@ def t_no_copy_button_or_overlay(src):
         assert dead not in src, "%s survived the cleanup" % dead
 
 
+def t_steam_id_is_read_from_the_seat(src):
+    """A seated player's Steam id lands on their row; an unseated colour gives null.
+
+    The name is what the site cannot resolve -- people rename, and it will not match a Discord
+    handle -- so the stable id travels alongside it rather than replacing it.
+    """
+    import json as _json
+    rt = _export_fixture(src, """
+  S.rows[1].color = "Red"
+  S.rows[2].color = "Yellow"
+  __H.seated = { {color="Red", seated=true, steam_name="MrDrouf", steam_id="76561198000000001"} }
+""")
+    p = _json.loads(rt.globals().__fixture())
+    got = {e["faction"]: e for e in p["participants"]}
+    assert got["woodland-alliance"]["player_steam_id"] == "76561198000000001", \
+        got["woodland-alliance"]["player_steam_id"]
+    assert got["lord-of-the-hundreds"]["player_steam_id"] is None, "an unseated colour must be null"
+
+
 def t_export_is_pure_ascii(src):
     """The payload must be ASCII: a real export carried a raw TM in a player name."""
     rt = _export_fixture(src, '  S.rows[1].player = "KRT\\u{2122}McArthur"')
@@ -295,6 +316,7 @@ def t_export_is_pure_ascii(src):
 DIRECT += [("export emits the full schema",   t_export_emits_the_full_schema),
            ("one record, one notebook tab",    t_export_is_one_record_to_one_tab),
            ("no COPY button or overlay",       t_no_copy_button_or_overlay),
+           ("steam id read from the seat",     t_steam_id_is_read_from_the_seat),
            ("export payload is pure ascii",    t_export_is_pure_ascii)]
 
 
