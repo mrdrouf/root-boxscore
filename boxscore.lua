@@ -2283,14 +2283,20 @@ end
 -- quotes are escaped too. They are legal XML inside a single-quoted attribute, which is why they
 -- were left alone before, but TTS's XmlUI is not a real XML parser and every value in a JSON string
 -- is wrapped in them.
--- \uXXXX-escape everything outside ASCII. Still valid JSON, and the site reads it identically, but
--- the string handed to TTS is now plain ASCII -- the observed payload carried a raw TM in a player
--- name ("KRT(tm)McArthur"), and TTS's UI pipeline is not to be trusted with that.
+-- \uXXXX-escape everything outside ASCII, AND the three characters that are special in XML. Both
+-- stay valid JSON that the site reads identically, but the string handed to TTS is then plain ASCII
+-- with no &, < or > anywhere -- so TTS's inner-text entity bug (nolt #941: entities in element
+-- content render raw, or in newer builds throw a parse error) has nothing to act on, and no escaping
+-- of our own is needed. The observed payload also carried a raw U+2122 in a player name.
+local XML_SPECIAL = { ["&"] = "\\u0026", ["<"] = "\\u003C", [">"] = "\\u003E" }
+
 function asciiOnly(str)
   local out, i, n = {}, 1, #str
   while i <= n do
     local b = str:byte(i)
-    if b < 128 then out[#out + 1] = str:sub(i, i); i = i + 1
+    local ch = str:sub(i, i)
+    if XML_SPECIAL[ch] then out[#out + 1] = XML_SPECIAL[ch]; i = i + 1
+    elseif b < 128 then out[#out + 1] = ch; i = i + 1
     else
       local len, cp
       if     b >= 240 then len, cp = 4, b - 240
@@ -2311,10 +2317,15 @@ function asciiOnly(str)
   return table.concat(out)
 end
 
--- Element CONTENT only needs & < > handled; a double quote is ordinary text there. That is the
--- entire reason for putting the payload between the tags rather than in text="...".
+-- Nothing left to escape: asciiOnly already turned &, < and > into JSON \u escapes, and a double
+-- quote is ordinary text inside element content. Emitting entities here would be actively wrong --
+-- TTS renders them raw in inner text. This only asserts the payload really is clean.
 function escInner(str)
-  return (tostring(str or ""):gsub("&", "+"):gsub("<", "&#60;"):gsub(">", "&#62;"))
+  str = tostring(str or "")
+  if str:find("[&<>]") then                      -- should be impossible; never ship broken XML
+    str = str:gsub("&", " "):gsub("<", " "):gsub(">", " ")
+  end
+  return str
 end
 
 function copyFieldText()
@@ -2338,18 +2349,15 @@ function writeCopyNotebook(text)
   if not done then Notes.addNotebookTab({ title = title, body = text }) end
 end
 
+-- No setAttribute, no setValue, no timers. Both are documented as broken for this exact case:
+--   nolt #1317  setAttribute(id, "text", v) CLEARS an InputField when v is a JSON object -- a bare
+--               "{}" is enough. getAttribute still returns the value; only the display goes blank.
+--   nolt #2151  setValue updates the value but never what the element displays.
+-- So the pushes were not a fallback, they were the thing wiping the inner text. The field is set
+-- once, by setXml, as element content. All this does now is keep the notebook copy.
 function fillCopyField()
   local text = copyFieldText()
   if text == "" then return end
-  local function push()
-    pcall(function() self.UI.setAttribute("cpyfld", "text", text) end)
-    pcall(function() self.UI.setValue("cpyfld", text) end)
-  end
-  push()                     -- in case the panel is already up from a previous rebuild
-  Wait.frames(push, 3)
-  Wait.time(push, 0.4)
-  Wait.time(push, 1.5)       -- after any dirty-poll rebuild that landed in between
-  Wait.time(push, 3.0)       -- and after a slow setXml on a busy table
   pcall(function() writeCopyNotebook(text) end)
 end
 

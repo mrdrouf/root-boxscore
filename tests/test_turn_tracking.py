@@ -276,22 +276,37 @@ def t_copy_field_uses_double_quoted_attributes(src):
     assert not everywhere, "elements built with single-quoted attributes: %s" % everywhere[:3]
 
 
+def t_no_setattribute_on_the_copy_field(src):
+    """setAttribute and setValue must never touch this field.
+
+    TTS nolt #1317: setAttribute(id,"text",v) CLEARS an InputField when v is a JSON object -- "{}" is
+    enough, and getAttribute still returns the value, so only the display blanks. nolt #2151:
+    setValue updates the value but never the display. Those calls were not a fallback, they were
+    wiping the inner text that setXml had correctly placed.
+    """
+    assert 'setAttribute("cpyfld"' not in src, "setAttribute is back on the copy field -- it clears it"
+    assert 'setValue("cpyfld"' not in src, "setValue is back on the copy field -- it does nothing"
+
+
 def t_payload_is_pure_ascii(src):
-    """The pushed JSON must be ASCII: the real payload carried a raw TM in a player name."""
+    """The payload must be ASCII AND free of &, < and > -- it goes in as XML element content."""
     rt = lupa.LuaRuntime(unpack_returned_tuples=True)
     rt.execute(open(os.path.join(HERE, "tts_stub.lua"), encoding="utf-8").read())
     rt.execute(src + """
 function __ascii_fixture()
   S.meta.map = "Marsh"
-  S.rows = { { fac = "Marquise", player = "KRT\\u{2122}McArthur", variant = "", locks = {1} } }
+  S.rows = { { fac = "Marquise", player = "A&B<C>D KRT\\u{2122}McArthur", variant = "", locks = {1} } }
   return copyFieldText()
 end
 """)
     got = rt.globals().__ascii_fixture()
     assert all(ord(c) < 128 for c in got), "non-ASCII survived: %r" % [c for c in got if ord(c) > 127]
+    for bad in ("&", "<", ">"):
+        assert bad not in got, "%r survived into XML element content: %s" % (bad, got)
     assert "\\u2122" in got.replace("\\\\", "\\"), "the TM was dropped instead of escaped: %s" % got
     import json as _json
-    assert _json.loads(got)["participants"][0]["player"] == "KRT\u2122McArthur"
+    assert _json.loads(got)["participants"][0]["player"] == "A&B<C>D KRT\u2122McArthur", \
+        "the \\u escapes must decode back to the real characters"
 
 
 def t_copy_also_reaches_the_notebook(src):
@@ -324,6 +339,7 @@ end
 
 DIRECT += [("copy emits the tournament schema", t_copy_emits_the_tournament_schema),
            ("copy field double-quoted attrs",   t_copy_field_uses_double_quoted_attributes),
+           ("no setAttribute on copy field",    t_no_setattribute_on_the_copy_field),
            ("payload is pure ascii",            t_payload_is_pure_ascii),
            ("copy also reaches the notebook",   t_copy_also_reaches_the_notebook)]
 
