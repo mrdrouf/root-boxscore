@@ -250,18 +250,27 @@ end
             assert absent not in e, "%s was invented for %s" % (absent, e["faction"])
 
 
-def t_copy_field_uses_every_mechanism(src):
-    """The box has come up empty three ways, so it no longer relies on any one of them.
+def t_copy_field_uses_double_quoted_attributes(src):
+    """The copy field must be built like every other element: DOUBLE-quoted attributes.
 
-    Inline-only, one async setAttribute, and setAttribute on timers have each been tried and each
-    left it blank. All of them now run, writing the same string, plus setValue.
+    This was the whole bug, and it survived three "fixes" because none of them touched it. The field
+    was the only element in the file with single-quoted attributes, and TTS's XmlUI does not accept
+    them -- so its text never parsed AND its id never registered, which silently disabled the
+    setAttribute and setValue pushes as well. It rendered as a bare InputField with the stock
+    placeholder, which is exactly what was reported three times.
     """
-    assert "fillCopyField()" in src, "the copy overlay no longer fills the field"
-    i = src.index("id='cpyfld'")
-    decl = src[i:src.index("/>", i)]
-    assert "copyFieldXmlEscape(copyFieldText())" in decl, "the JSON is no longer inline: %s" % decl[:140]
-    assert 'setAttribute("cpyfld", "text", text)' in src, "nothing pushes via setAttribute"
-    assert 'setValue("cpyfld", text)' in src, "nothing pushes via setValue"
+    import re as _re
+    i = src.index('id="cpyfld"')
+    decl = src[src.rindex("add(", 0, i):src.index("/>", i)]
+    # a single-quoted ATTRIBUTE looks like name=' ; the Lua string literals' own quotes are fine
+    bad = _re.findall(r"[a-zA-Z]+='", decl)
+    assert not bad, "single-quoted attributes are back on the copy field: %s" % bad
+    assert 'text="' in decl and "fieldText(copyFieldText())" in decl, \
+        "the copy field is not carrying its text the way the working fields do: %s" % decl[:160]
+
+    # and no element anywhere may drift back to single-quoted attributes
+    everywhere = _re.findall(r"<[A-Za-z]+ [^>\n]*?[a-zA-Z]+='", src)
+    assert not everywhere, "elements built with single-quoted attributes: %s" % everywhere[:3]
 
 
 def t_copy_also_reaches_the_notebook(src):
@@ -292,25 +301,8 @@ end
     assert p["participants"][0]["faction"] == "marquise-de-cat"
 
 
-def t_copy_field_escapes_every_xml_breaker(src):
-    """Every character that can break TTS's XmlUI is escaped, as a NUMERIC entity.
-
-    The double quote is the one that was missing: legal XML inside a single-quoted attribute, which
-    is why it was left alone, but every value in a JSON string is wrapped in one.
-    """
-    rt = lupa.LuaRuntime(unpack_returned_tuples=True)
-    rt.execute(open(os.path.join(HERE, "tts_stub.lua"), encoding="utf-8").read())
-    rt.execute(src)
-    got = rt.globals().copyFieldXmlEscape("""{"a":"x&y<z>1'2"}""")
-    assert "&#34;" in got and "&#38;" in got and "&#60;" in got and "&#62;" in got and "&#39;" in got, got
-    for raw in ('"', "&", "<", ">", "'"):
-        assert raw not in got.replace("&#34;", "").replace("&#38;", "").replace(
-            "&#60;", "").replace("&#62;", "").replace("&#39;", ""), "%r survived: %s" % (raw, got)
-
-
 DIRECT += [("copy emits the tournament schema", t_copy_emits_the_tournament_schema),
-           ("copy field uses every mechanism",  t_copy_field_uses_every_mechanism),
-           ("copy field escapes xml breakers",  t_copy_field_escapes_every_xml_breaker),
+           ("copy field double-quoted attrs",   t_copy_field_uses_double_quoted_attributes),
            ("copy also reaches the notebook",   t_copy_also_reaches_the_notebook)]
 
 

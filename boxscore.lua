@@ -2289,13 +2289,6 @@ function copyFieldText()
   return text
 end
 
--- numeric entities only: TTS renders the named ones (&amp;) literally or rejects them outright
-function copyFieldXmlEscape(text)
-  return (tostring(text or "")
-    :gsub("&", "&#38;"):gsub("<", "&#60;"):gsub(">", "&#62;")
-    :gsub("'", "&#39;"):gsub('"', "&#34;"))
-end
-
 -- Also drop the same JSON into a notebook tab. This is the ONE route in this file already proven to
 -- work at the table -- uiExport has always written the internal record this way -- so whatever the
 -- InputField is doing, the payload is reachable: Notebook -> "BoxScore JSON", select, copy.
@@ -2685,15 +2678,16 @@ function rebuildUI()
     add('<Text fontSize="12" fontStyle="Bold" color="' .. PARCH .. '" preferredHeight="16"'
       .. ' alignment="MiddleLeft"' .. NOClick
       .. '>the box-score record as JSON &#8211; click the box, select all (Ctrl+A), copy (Ctrl+C) &#183; also in Notebook &#8594; &#8220;BoxScore JSON&#8221;</Text>')
-    -- The field is emitted EMPTY and filled afterwards. Both of the other approaches have now been
-    -- tried and both left it blank: baking the JSON into the attribute (a whole internal record is
-    -- long, and one bad character or an over-long attribute makes TTS drop the panel silently), and
-    -- a single async setAttribute (which raced the build). So: no JSON in the XML at all, and the
-    -- text pushed in twice afterwards, once on the next frames and once a beat later, because
-    -- setAttribute on a field that does not exist yet is simply a no-op.
-    add("<InputField id='cpyfld' fontSize='10' preferredHeight='130' lineType='MultiLineNewLine'"
-      .. " colors='#F1E5C8|#FFFFFF|#FFFFFF|#00000000' textColor='" .. INKTXT .. "'"
-      .. " text='" .. copyFieldXmlEscape(copyFieldText()) .. "'/>")
+    -- DOUBLE quotes, like every other element in this file. This one was built with SINGLE-quoted
+    -- attributes and it was the only one in 2900 lines that was -- TTS's XmlUI does not accept them,
+    -- so nothing here parsed: not the text, and not even id='cpyfld', which is why setAttribute and
+    -- setValue on it were silent no-ops too. It rendered as a bare InputField with the stock
+    -- "Enter text..." placeholder. One cause behind every empty box reported.
+    -- fieldText/esc is the escaper the working fields use: it turns & into +, and <, > and " into
+    -- numeric entities, which is what survives the pipeline.
+    add('<InputField id="cpyfld" fontSize="10" preferredHeight="130" lineType="MultiLineNewLine"'
+      .. ' colors="#F1E5C8|#FFFFFF|#FFFFFF|#00000000" textColor="' .. INKTXT .. '"'
+      .. ' text="' .. fieldText(copyFieldText()) .. '"/>')
     fillCopyField()
     add('<HorizontalLayout preferredHeight="26" spacing="6" childForceExpandWidth="false">')
     add('<Text flexibleWidth="1"' .. NOClick .. '> </Text>')
