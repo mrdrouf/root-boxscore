@@ -193,6 +193,76 @@ DIRECT = [("vagabond anchor vs plain objects", t_vagabond_anchor_survives_plain_
           ("removing a faction drops its row", t_removing_a_faction_drops_its_row)]
 
 
+def t_copy_emits_the_tournament_schema(src):
+    """COPY must produce the tournament site's JSON, and produce it at all.
+
+    Two separate bugs. The box came up EMPTY: the JSON was baked into an XML attribute, and a whole
+    internal record is long enough that one stray character or the sheer length makes TTS drop the
+    panel without a word. And the payload was the mod's own record, not the schema the site ingests
+    (root_boxscore/EXPORT_SCHEMA.md). The field is now emitted empty and filled by fillCopyField,
+    with the compact tournament payload.
+    """
+    import json as _json
+    rt = lupa.LuaRuntime(unpack_returned_tuples=True)
+    rt.execute(open(os.path.join(HERE, "tts_stub.lua"), encoding="utf-8").read())
+    # S is a local of boxscore.lua, so the fixture is compiled INTO the same chunk to reach it
+    rt.execute(src + """
+function __export_fixture()
+  S.meta.map = "Autumn"; S.meta.deck = "Squires and Disciples"
+  S.unpicked = { Badgers = true }
+  S.rows = {
+    { fac = "Alliance", player = "mrdrouf", variant = "", locks = {3, 8, 14} },
+    { fac = "Rats", player = "mrmirz", variant = "",
+      locks = {1, 4, 8}, dom = { suit = "bird", round = 2, kind = "brazen_demagogue" } },
+    { fac = "Vagabond", player = "bw", variant = "Tinker", locks = {1, 4} },
+    { fac = "Eyrie", player = "bob", variant = "Commander", locks = {3, 8, 14, 19} },
+  }
+  return JSON.encode(tournamentPayload())
+end
+""")
+    p = _json.loads(rt.globals().__export_fixture())
+
+    assert p["board_map"] == "autumn", p.get("board_map")
+    assert p["deck"] == "squires-disciples", p.get("deck")
+    assert p["undrafted_faction"] == "keepers-in-iron", p.get("undrafted_faction")
+
+    got = {e["faction"]: e for e in p["participants"]}
+    assert set(got) == {"woodland-alliance", "lord-of-the-hundreds", "vagabond",
+                        "eyrie-dynasties"}, sorted(got)
+
+    a = got["woodland-alliance"]
+    assert a["player"] == "mrdrouf" and a["turn_order"] == 1
+    assert a["turns"] == [{"turn": 1, "score": 3}, {"turn": 2, "score": 8},
+                          {"turn": 3, "score": 14}], a["turns"]
+
+    r = got["lord-of-the-hundreds"]
+    assert r["dominance"] == "Bird", r.get("dominance")
+    assert r["brazen_demagogue"] is True
+    assert r["turns"][0] == {"turn": 1, "score": 1}, "turn 1 predates the dominance"
+    assert r["turns"][1].get("dominance") is True, "turn 2 onward carries the dominance flag"
+
+    assert got["vagabond"]["vagabond"] == "tinker", got["vagabond"].get("vagabond")
+    assert got["eyrie-dynasties"]["starting_leader"] == "Commander"
+    assert "starting_leader" not in got["vagabond"], "only the Eyrie has a leader"
+
+    for e in p["participants"]:          # unsourced fields are omitted, never guessed
+        for absent in ("coalition", "captains", "discarded_captain", "tournament_score"):
+            assert absent not in e, "%s was invented for %s" % (absent, e["faction"])
+
+
+def t_copy_field_is_filled_after_the_panel_exists(src):
+    """The JSON must not be in the XML at all -- that is what blanked the box."""
+    assert "fillCopyField()" in src, "the copy overlay no longer fills the field"
+    i = src.index("id='cpyfld'")
+    decl = src[i:src.index("/>", i)]
+    assert "text=''" in decl, "the JSON is being baked into the attribute again: %s" % decl[:120]
+    assert "setAttribute(\"cpyfld\", \"text\", text)" in src, "nothing pushes the text in"
+
+
+DIRECT += [("copy emits the tournament schema", t_copy_emits_the_tournament_schema),
+           ("copy field filled after build",    t_copy_field_is_filled_after_the_panel_exists)]
+
+
 CASES = [
     ("2 players",                      FACTIONS[:2], ["Red", "Yellow"],
      ["Red", "Yellow"], 2, 2),

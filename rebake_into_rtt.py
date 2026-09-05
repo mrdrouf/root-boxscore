@@ -20,6 +20,18 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
+def replace_or_skip(text: str, old: str, new: str, label: str) -> str:
+    """Apply an RTT tweak, unless the standalone has since adopted it upstream.
+
+    ab6bfbb ("stop the sheet widening mid-game") moved the fixed round-column count into the
+    standalone, so this script's substitution had silently become dead and the rebake refused to
+    run at all. An RTT tweak that the standalone now agrees with is a no-op, not an error.
+    """
+    if new in text:
+        return text
+    return replace_once(text, old, new, label)
+
+
 def existing_line(lua: str, pattern: str, label: str) -> str:
     match = re.search(pattern, lua, re.MULTILINE)
     if not match:
@@ -60,13 +72,13 @@ def apply_rtt_additions(source: str, existing: str) -> str:
     )
 
     # Applied here: RTT pins the round-column count and the slab rectangle.
-    source = replace_once(
+    source = replace_or_skip(
         source,
         "  local showR = math.min(math.max((S.cols or 10) + 1, maxLocks + 2), 41)\n",
-        "  local showR = math.min((S.cols or 10) + 1, 41)   -- FIXED: no maxLocks growth\n",
+        "  local showR = math.min((S.cols or 10) + 1, 41)\n",
         "fixed RTT round columns",
     )
-    source = replace_once(
+    source = replace_or_skip(
         source,
         "  local wh = (H + 2 * FRAME) * k\n",
         "  local wh = (H + 2 * FRAME) * k\n"
@@ -96,7 +108,9 @@ def main() -> None:
         'Global.getVar("RTT_BOXSCORE_MIN")',
         "local EMPTY_ROW =",
         "ww = 31.80 wh = 10.42",
-        "no maxLocks growth",
+        "local showR = math.min((S.cols or 10) + 1, 41)",   # was "no maxLocks growth": the
+        # standalone adopted the fixed column count in ab6bfbb, so the comment this script used
+        # to inject no longer exists. Check the LINE, which is what actually matters.
         "local function dominanceCardSuit",
         "if seatOrder() then dirty = true end",
         "if pinFirstSeat() then dirty = true end",

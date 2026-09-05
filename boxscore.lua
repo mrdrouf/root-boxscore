@@ -1061,6 +1061,66 @@ local function unpickedList()
   return out
 end
 
+-- The tournament site's own schema (root_boxscore/EXPORT_SCHEMA.md), which is NOT the internal
+-- record exportPayload builds. Almost every field is optional, so anything this object does not
+-- track is simply left out rather than guessed: coalition, captains, discarded_captain and
+-- tournament_score have no source here.
+local FACTION_SLUG = {
+  Marquise = "marquise-de-cat",   Eyrie    = "eyrie-dynasties",  Alliance = "woodland-alliance",
+  Vagabond = "vagabond",          Riverfolk= "riverfolk-company", Lizard  = "lizard-cult",
+  Duchy    = "underground-duchy", Crows    = "corvid-conspiracy", Rats    = "lord-of-the-hundreds",
+  Badgers  = "keepers-in-iron",   Knaves   = "knaves-of-the-deepwood",
+  Council  = "twilight-council",  Diaspora = "lilypad-diaspora",
+}
+
+local function slug(v)
+  v = tostring(v or ""):lower()
+  v = v:gsub("&", " "):gsub("%f[%w]and%f[%W]", " ")   -- "Squires and Disciples" -> squires-disciples
+  v = v:gsub("[^%w]+", "-"):gsub("^%-+", ""):gsub("%-+$", "")
+  return v
+end
+
+function tournamentPayload()   -- global: the tests drive it directly
+  local p = {}
+  if S.meta.map  ~= "" then p.board_map = slug(S.meta.map) end
+  if S.meta.deck ~= "" then p.deck      = slug(S.meta.deck) end
+  for _, fac in ipairs(ROSTER) do
+    if S.unpicked[fac] == true then
+      p.undrafted_faction = FACTION_SLUG[fac] or slug(fac)
+      local v = S.unpickedVar and S.unpickedVar[fac] or ""
+      if v ~= "" and (fac == "Vagabond" or fac == "Knaves") then p.undrafted_vagabond = slug(v) end
+      break
+    end
+  end
+  local parts = {}
+  for i, row in ipairs(S.rows) do
+    local e = { faction = FACTION_SLUG[row.fac] or slug(row.fac), turn_order = i }
+    if row.player ~= nil and row.player ~= "" then e.player = row.player end
+    if row.variant ~= nil and row.variant ~= "" then
+      if row.fac == "Eyrie" then e.starting_leader = row.variant
+      elseif row.fac == "Vagabond" or row.fac == "Knaves" then e.vagabond = slug(row.variant) end
+    end
+    if row.dom ~= nil then
+      if row.dom.suit ~= nil then
+        e.dominance = row.dom.suit:sub(1, 1):upper() .. row.dom.suit:sub(2)
+      end
+      e.brazen_demagogue = (row.dom.kind == "brazen_demagogue")
+    end
+    local turns = {}
+    for r, sc in ipairs(row.locks or {}) do
+      if type(sc) == "number" and sc >= 0 then
+        local t = { turn = r, score = sc }
+        if row.dom ~= nil and row.dom.round ~= nil and r >= row.dom.round then t.dominance = true end
+        table.insert(turns, t)
+      end
+    end
+    if #turns > 0 then e.turns = turns end
+    table.insert(parts, e)
+  end
+  p.participants = parts
+  return p
+end
+
 local function exportPayload(kind, extra)
   local p = { type = kind, t = now(), meta = S.meta, turns = S.turns,
               turnOrder = Turns.order, unpicked = unpickedList(),
@@ -2214,6 +2274,18 @@ local function renderMinRows()
   return math.max(1, n or 4)
 end
 
+-- Push the export JSON into the COPY box after the panel exists. Kept small on purpose: it is the
+-- tournament-site payload, not the internal record, which is both what the site wants and short
+-- enough that nothing here is fighting TTS's XML limits any more.
+function fillCopyField()
+  local text = ""
+  pcall(function() text = JSON.encode(tournamentPayload()) end)
+  if text == "" then return end
+  local function push() pcall(function() self.UI.setAttribute("cpyfld", "text", text) end) end
+  Wait.frames(push, 3)
+  Wait.time(push, 0.4)
+end
+
 function rebuildUI()
   if S.hidden then
     self.UI.setXml("")
@@ -2574,17 +2646,15 @@ function rebuildUI()
     add('<Text fontSize="12" fontStyle="Bold" color="' .. PARCH .. '" preferredHeight="16"'
       .. ' alignment="MiddleLeft"' .. NOClick
       .. '>the box-score record as JSON &#8211; click the box, select all (Ctrl+A), copy (Ctrl+C)</Text>')
-    -- the JSON is baked straight into the field (no async setAttribute,
-    -- which raced the UI build and left the box empty on a busy table).
-    -- It sits in a SINGLE-quoted attribute, so the JSON's own double quotes
-    -- pass through untouched and stay valid, readable JSON; only the three
-    -- characters that would break the XML are escaped, and with the NUMERIC
-    -- entities this mod has verified TTS decodes (named ones like &amp; can
-    -- be rejected outright, which blanks the whole panel).
-    local rec = JSON.encode(exportPayload("copy"))
-    rec = rec:gsub("&", "&#38;"):gsub("<", "&#60;"):gsub("'", "&#39;")
+    -- The field is emitted EMPTY and filled afterwards. Both of the other approaches have now been
+    -- tried and both left it blank: baking the JSON into the attribute (a whole internal record is
+    -- long, and one bad character or an over-long attribute makes TTS drop the panel silently), and
+    -- a single async setAttribute (which raced the build). So: no JSON in the XML at all, and the
+    -- text pushed in twice afterwards, once on the next frames and once a beat later, because
+    -- setAttribute on a field that does not exist yet is simply a no-op.
     add("<InputField id='cpyfld' fontSize='10' preferredHeight='130' lineType='MultiLineNewLine'"
-      .. " colors='#F1E5C8|#FFFFFF|#FFFFFF|#00000000' textColor='" .. INKTXT .. "' text='" .. rec .. "'/>")
+      .. " colors='#F1E5C8|#FFFFFF|#FFFFFF|#00000000' textColor='" .. INKTXT .. "' text=''/>")
+    fillCopyField()
     add('<HorizontalLayout preferredHeight="26" spacing="6" childForceExpandWidth="false">')
     add('<Text flexibleWidth="1"' .. NOClick .. '> </Text>')
     add('<Button fontSize="12" fontStyle="Bold" preferredWidth="70" ' .. BTN_GOLD

@@ -97,26 +97,31 @@ attached on the site instead.
 }
 ```
 
-## What the box score can already fill, and what it cannot
+## What the box score fills, and what it does not
 
-`exportPayload()` (boxscore.lua) is the current shape and is NOT this schema -- it is the mod's own
-internal record. Mapping, checked against the source rather than assumed:
+**Implemented.** `tournamentPayload()` in boxscore.lua builds exactly this, and COPY shows it.
+`exportPayload()` still builds the mod's own internal record for the Discord/notebook export -- the
+two are deliberately separate.
 
-| schema field | source today | note |
+Mapping, checked against the source. An earlier draft of this table called `board_map`, `deck` and
+`starting_leader` gaps; they are not -- the object already detects all three.
+
+| schema field | source | note |
 |---|---|---|
-| `turns[]` | `S.turns`, `row.locks` | the object's whole purpose; per-turn locked scores already exist |
-| `turn_order` | `Turns.order`, row order by seat | rows are already ordered by physical seat |
-| `faction` | `row.fac` | needs slugifying (`Woodland Alliance` -> `woodland-alliance`) |
-| `player` | `row.player` | |
-| `vagabond` | `row.variant` | the per-row variant auto-detect already resolves vagabond characters |
-| `dominance` | `row.dom` | schema wants the SUIT name (`"Bird"`); `row.dom` carries suit + turn + kind |
-| `brazen_demagogue` | `row.dom.kind == "brazen_demagogue"` | already distinguished, for the frozen-score rule |
-| `undrafted_faction` / `undrafted_captains` | `S.unpicked`, `S.unpickedVar` | `unpickedList()` already builds this |
-| `board_map` | **gap** | RTT publishes `RTT_CURRENT_MAP` on board `bab7e1`; the standalone has no map NAME, only the score-track geometry |
-| `deck` | **gap** | nothing reads which deck was chosen |
-| `coalition` | **gap** | vagabond coalitions are not tracked |
-| `captains` / `discarded_captain` | **gap** | Knaves captains are not tracked per row |
-| `starting_leader` | **gap** | the Eyrie leader is not tracked |
-| `tournament_score` | **gap** | a tournament outcome, not a game fact -- probably manual entry |
+| `board_map` | `S.meta.map` | auto-detected from the map's image URL (`MAP_NAMES`), slugified |
+| `deck` | `S.meta.deck` | auto-detected from the card-back art (`DECK_BACKS`); "and" is dropped, so "Squires and Disciples" -> `squires-disciples` |
+| `faction` | `row.fac` via `FACTION_SLUG` | the roster's short names map to the site's full slugs (`Rats` -> `lord-of-the-hundreds`) |
+| `player` | `row.player` | omitted when blank |
+| `turn_order` | row index | rows are already ordered by physical seat |
+| `turns[]` | `row.locks` | one entry per locked round; `-1` (no score yet) is skipped |
+| `turns[].dominance` | `row.dom.round` | set from the round the dominance was taken onward |
+| `dominance` | `row.dom.suit` | capitalised for the site: `bird` -> `Bird` |
+| `brazen_demagogue` | `row.dom.kind` | already distinguished, for the frozen-score rule |
+| `vagabond` | `row.variant` | the variant auto-detect resolves the character for Vagabond and Knaves |
+| `starting_leader` | `row.variant` | the SAME field: for the Eyrie it holds a leader, not a character |
+| `undrafted_faction` / `undrafted_vagabond` | `S.unpicked`, `S.unpickedVar` | first unpicked faction |
+| `coalition` | **not tracked** | omitted |
+| `captains` / `discarded_captain` | **not tracked** | omitted |
+| `tournament_score` | **not tracked** | a tournament outcome, not a game fact -- omitted |
 
-The gaps are all optional fields, so a first version can emit the core and omit them.
+Nothing unsourced is guessed: those four keys are simply absent, which the schema allows.

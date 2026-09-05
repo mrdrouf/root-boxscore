@@ -63,7 +63,42 @@ end })
 _G.Global = { getVar=function(k) return H.globals and H.globals[k] end,
               setVar=function(k,v) H.globals = H.globals or {}; H.globals[k]=v end,
               call=function() end }
-_G.JSON = { encode=function(v) return "{}" end, decode=function(s) return nil end }
+-- A real encoder, because the export tests read the JSON back in Python. Arrays vs objects the way
+-- TTS decides it: a table with a [1] and no other keys is an array.
+local function _isarr(t)
+  local n = 0
+  for k in pairs(t) do
+    if type(k) ~= "number" then return false end
+    n = n + 1
+  end
+  return n == #t
+end
+local function _enc(v)
+  local ty = type(v)
+  if ty == "nil" then return "null" end
+  if ty == "boolean" then return tostring(v) end
+  if ty == "number" then
+    if v == math.floor(v) then return string.format("%d", v) end
+    return tostring(v)
+  end
+  if ty == "string" then
+    return '"' .. v:gsub('[\\"]', '\\%0'):gsub("\n", "\\n") .. '"'
+  end
+  if ty == "table" then
+    local out = {}
+    if _isarr(v) then
+      for _, x in ipairs(v) do out[#out+1] = _enc(x) end
+      return "[" .. table.concat(out, ",") .. "]"
+    end
+    local keys = {}
+    for k in pairs(v) do keys[#keys+1] = tostring(k) end
+    table.sort(keys)
+    for _, k in ipairs(keys) do out[#out+1] = _enc(k) .. ":" .. _enc(v[k]) end
+    return "{" .. table.concat(out, ",") .. "}"
+  end
+  return "null"
+end
+_G.JSON = { encode=_enc, decode=function(s) return nil end }
 _G.WebRequest = { post=function() end, get=function() end }
 _G.Notes = { getNotebookTabs=function() return {} end, setNotebookTabs=function() end }
 _G.UI = { setAttribute=function() end, getAttribute=function() return "" end, setXml=function() end }
