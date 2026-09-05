@@ -2274,16 +2274,55 @@ local function renderMinRows()
   return math.max(1, n or 4)
 end
 
--- Push the export JSON into the COPY box after the panel exists. Kept small on purpose: it is the
--- tournament-site payload, not the internal record, which is both what the site wants and short
--- enough that nothing here is fighting TTS's XML limits any more.
-function fillCopyField()
+-- The COPY box has now come up empty three ways: the JSON inline with only & < ' escaped, a single
+-- async setAttribute, and setAttribute on a few timers. So this stops relying on any ONE mechanism
+-- and does all of them, which is safe because they all write the same string.
+--
+-- The inline route is retried because the payload CHANGED: it is the compact tournament record now,
+-- not the whole internal one, so the length problem is gone -- and this time the JSON's own double
+-- quotes are escaped too. They are legal XML inside a single-quoted attribute, which is why they
+-- were left alone before, but TTS's XmlUI is not a real XML parser and every value in a JSON string
+-- is wrapped in them.
+function copyFieldText()
   local text = ""
   pcall(function() text = JSON.encode(tournamentPayload()) end)
+  return text
+end
+
+-- numeric entities only: TTS renders the named ones (&amp;) literally or rejects them outright
+function copyFieldXmlEscape(text)
+  return (tostring(text or "")
+    :gsub("&", "&#38;"):gsub("<", "&#60;"):gsub(">", "&#62;")
+    :gsub("'", "&#39;"):gsub('"', "&#34;"))
+end
+
+-- Also drop the same JSON into a notebook tab. This is the ONE route in this file already proven to
+-- work at the table -- uiExport has always written the internal record this way -- so whatever the
+-- InputField is doing, the payload is reachable: Notebook -> "BoxScore JSON", select, copy.
+function writeCopyNotebook(text)
+  local title = "BoxScore JSON"
+  local done = false
+  for _, t in ipairs(Notes.getNotebookTabs()) do
+    if t.title == title then
+      Notes.editNotebookTab({ index = t.index, title = title, body = text })
+      done = true
+    end
+  end
+  if not done then Notes.addNotebookTab({ title = title, body = text }) end
+end
+
+function fillCopyField()
+  local text = copyFieldText()
   if text == "" then return end
-  local function push() pcall(function() self.UI.setAttribute("cpyfld", "text", text) end) end
+  local function push()
+    pcall(function() self.UI.setAttribute("cpyfld", "text", text) end)
+    pcall(function() self.UI.setValue("cpyfld", text) end)
+  end
+  push()                     -- in case the panel is already up from a previous rebuild
   Wait.frames(push, 3)
   Wait.time(push, 0.4)
+  Wait.time(push, 1.5)       -- after any dirty-poll rebuild that landed in between
+  pcall(function() writeCopyNotebook(text) end)
 end
 
 function rebuildUI()
@@ -2645,7 +2684,7 @@ function rebuildUI()
     add('<VerticalLayout padding="12 12 10 8" spacing="5" childForceExpandHeight="false">')
     add('<Text fontSize="12" fontStyle="Bold" color="' .. PARCH .. '" preferredHeight="16"'
       .. ' alignment="MiddleLeft"' .. NOClick
-      .. '>the box-score record as JSON &#8211; click the box, select all (Ctrl+A), copy (Ctrl+C)</Text>')
+      .. '>the box-score record as JSON &#8211; click the box, select all (Ctrl+A), copy (Ctrl+C) &#183; also in Notebook &#8594; &#8220;BoxScore JSON&#8221;</Text>')
     -- The field is emitted EMPTY and filled afterwards. Both of the other approaches have now been
     -- tried and both left it blank: baking the JSON into the attribute (a whole internal record is
     -- long, and one bad character or an over-long attribute makes TTS drop the panel silently), and
@@ -2653,7 +2692,8 @@ function rebuildUI()
     -- text pushed in twice afterwards, once on the next frames and once a beat later, because
     -- setAttribute on a field that does not exist yet is simply a no-op.
     add("<InputField id='cpyfld' fontSize='10' preferredHeight='130' lineType='MultiLineNewLine'"
-      .. " colors='#F1E5C8|#FFFFFF|#FFFFFF|#00000000' textColor='" .. INKTXT .. "' text=''/>")
+      .. " colors='#F1E5C8|#FFFFFF|#FFFFFF|#00000000' textColor='" .. INKTXT .. "'"
+      .. " text='" .. copyFieldXmlEscape(copyFieldText()) .. "'/>")
     fillCopyField()
     add('<HorizontalLayout preferredHeight="26" spacing="6" childForceExpandWidth="false">')
     add('<Text flexibleWidth="1"' .. NOClick .. '> </Text>')

@@ -100,7 +100,26 @@ local function _enc(v)
 end
 _G.JSON = { encode=_enc, decode=function(s) return nil end }
 _G.WebRequest = { post=function() end, get=function() end }
-_G.Notes = { getNotebookTabs=function() return {} end, setNotebookTabs=function() end }
+-- A working notebook, so the export/copy paths can be read back
+local _tabs = {}
+_G.Notes = {
+  getNotebookTabs = function() return _tabs end,
+  setNotebookTabs = function(t) _tabs = t or {} end,
+  addNotebookTab  = function(t)
+    _tabs[#_tabs+1] = { index = #_tabs, title = t.title, body = t.body }
+    return #_tabs - 1
+  end,
+  editNotebookTab = function(t)
+    for _, e in ipairs(_tabs) do
+      if e.index == t.index then
+        if t.title then e.title = t.title end
+        if t.body  then e.body  = t.body  end
+        return true
+      end
+    end
+    return false
+  end,
+}
 _G.UI = { setAttribute=function() end, getAttribute=function() return "" end, setXml=function() end }
 _G.self = obj("Root Box Score","bs0001",{x=0,y=0,z=0})
 _G.self.UI = { setAttribute=function() end, setXml=function() end, getAttribute=function() return "" end }

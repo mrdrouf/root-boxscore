@@ -250,17 +250,68 @@ end
             assert absent not in e, "%s was invented for %s" % (absent, e["faction"])
 
 
-def t_copy_field_is_filled_after_the_panel_exists(src):
-    """The JSON must not be in the XML at all -- that is what blanked the box."""
+def t_copy_field_uses_every_mechanism(src):
+    """The box has come up empty three ways, so it no longer relies on any one of them.
+
+    Inline-only, one async setAttribute, and setAttribute on timers have each been tried and each
+    left it blank. All of them now run, writing the same string, plus setValue.
+    """
     assert "fillCopyField()" in src, "the copy overlay no longer fills the field"
     i = src.index("id='cpyfld'")
     decl = src[i:src.index("/>", i)]
-    assert "text=''" in decl, "the JSON is being baked into the attribute again: %s" % decl[:120]
-    assert "setAttribute(\"cpyfld\", \"text\", text)" in src, "nothing pushes the text in"
+    assert "copyFieldXmlEscape(copyFieldText())" in decl, "the JSON is no longer inline: %s" % decl[:140]
+    assert 'setAttribute("cpyfld", "text", text)' in src, "nothing pushes via setAttribute"
+    assert 'setValue("cpyfld", text)' in src, "nothing pushes via setValue"
+
+
+def t_copy_also_reaches_the_notebook(src):
+    """Whatever the InputField does, the JSON must be reachable by a route known to work.
+
+    uiExport has always written its record to a notebook tab and that has never been reported broken,
+    so COPY writes the tournament payload the same way. The box coming up empty then costs the
+    maintainer nothing.
+    """
+    rt = lupa.LuaRuntime(unpack_returned_tuples=True)
+    rt.execute(open(os.path.join(HERE, "tts_stub.lua"), encoding="utf-8").read())
+    rt.execute(src + """
+function __notebook_fixture()
+  S.meta.map = "Autumn"
+  S.rows = { { fac = "Marquise", player = "p", variant = "", locks = {2, 5} } }
+  fillCopyField()
+  for _, t in ipairs(Notes.getNotebookTabs()) do
+    if t.title == "BoxScore JSON" then return t.body end
+  end
+  return ""
+end
+""")
+    body = rt.globals().__notebook_fixture()
+    assert body and body != "", "COPY wrote nothing to the notebook"
+    import json as _json
+    p = _json.loads(body)
+    assert p["board_map"] == "autumn"
+    assert p["participants"][0]["faction"] == "marquise-de-cat"
+
+
+def t_copy_field_escapes_every_xml_breaker(src):
+    """Every character that can break TTS's XmlUI is escaped, as a NUMERIC entity.
+
+    The double quote is the one that was missing: legal XML inside a single-quoted attribute, which
+    is why it was left alone, but every value in a JSON string is wrapped in one.
+    """
+    rt = lupa.LuaRuntime(unpack_returned_tuples=True)
+    rt.execute(open(os.path.join(HERE, "tts_stub.lua"), encoding="utf-8").read())
+    rt.execute(src)
+    got = rt.globals().copyFieldXmlEscape("""{"a":"x&y<z>1'2"}""")
+    assert "&#34;" in got and "&#38;" in got and "&#60;" in got and "&#62;" in got and "&#39;" in got, got
+    for raw in ('"', "&", "<", ">", "'"):
+        assert raw not in got.replace("&#34;", "").replace("&#38;", "").replace(
+            "&#60;", "").replace("&#62;", "").replace("&#39;", ""), "%r survived: %s" % (raw, got)
 
 
 DIRECT += [("copy emits the tournament schema", t_copy_emits_the_tournament_schema),
-           ("copy field filled after build",    t_copy_field_is_filled_after_the_panel_exists)]
+           ("copy field uses every mechanism",  t_copy_field_uses_every_mechanism),
+           ("copy field escapes xml breakers",  t_copy_field_escapes_every_xml_breaker),
+           ("copy also reaches the notebook",   t_copy_also_reaches_the_notebook)]
 
 
 CASES = [
