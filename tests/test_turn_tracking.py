@@ -250,32 +250,20 @@ end
             assert absent not in e, "%s was invented for %s" % (absent, e["faction"])
 
 
-def t_copy_field_uses_double_quoted_attributes(src):
-    """The copy field must be built like every other element: DOUBLE-quoted attributes.
+def t_copy_panel_has_no_dead_inputfield(src):
+    """No InputField in the copy panel: measured over five rounds, one cannot be filled from script.
 
-    This was the whole bug, and it survived three "fixes" because none of them touched it. The field
-    was the only element in the file with single-quoted attributes, and TTS's XmlUI does not accept
-    them -- so its text never parsed AND its id never registered, which silently disabled the
-    setAttribute and setValue pushes as well. It rendered as a bare InputField with the stock
-    placeholder, which is exactly what was reported three times.
+    In the maintainer's game an InputField renders its placeholder but never text set from script --
+    not via the text attribute, not as inner text, not via setAttribute or setValue, with or without
+    an id, in any container. The final control was a byte-for-byte clone of the panel's own field
+    carrying "HELLO" and showed neither the word nor its own placeholder. The notebook is the
+    mechanism; a permanently empty box is worse than no box.
     """
-    import re as _re
-    # the MARKUP, not the comment above it that also mentions the id. The element is self-closing
-    # again now that inner text is known not to render, so end at the emitted "/>".
-    i = src.index('<InputField id="cpyfld"')
-    end = src.index('"/>', i)
-    decl = src[src.rindex("add(", 0, i):end + 3]
-    # a single-quoted ATTRIBUTE looks like name=' ; the Lua string literals' own quotes are fine
-    bad = _re.findall(r"[a-zA-Z]+='", decl)
-    assert not bad, "single-quoted attributes are back on the copy field: %s" % bad
-    assert "esc(wrapJson(copyFieldText()))" in decl, \
-        "the field is not carrying the wrapped JSON in the text attribute: %s" % decl[:200]
-    # inner text was MEASURED not to render: probe A carried plain text between the tags and was blank
-    assert "escInner(copyFieldText())" not in decl, "inner text is back, and it does not render"
-
-    # and no element anywhere may drift back to single-quoted attributes
-    everywhere = _re.findall(r"<[A-Za-z]+ [^>\n]*?[a-zA-Z]+='", src)
-    assert not everywhere, "elements built with single-quoted attributes: %s" % everywhere[:3]
+    # the PANEL branch, not uiCopy() at the top of the file which mentions the same condition
+    i = src.index('elseif S.overlay == "copy" then')
+    panel = src[i:src.index('elseif S.overlay ==', i + 10)]
+    assert "<InputField" not in panel, "the dead InputField is back in the copy panel"
+    assert "BoxScore JSON" in panel, "the panel no longer tells the user where the JSON is"
 
 
 def t_no_setattribute_on_the_copy_field(src):
@@ -340,7 +328,7 @@ end
 
 
 DIRECT += [("copy emits the tournament schema", t_copy_emits_the_tournament_schema),
-           ("copy field double-quoted attrs",   t_copy_field_uses_double_quoted_attributes),
+           ("copy panel has no dead field",     t_copy_panel_has_no_dead_inputfield),
            ("no setAttribute on copy field",    t_no_setattribute_on_the_copy_field),
            ("payload is pure ascii",            t_payload_is_pure_ascii),
            ("copy also reaches the notebook",   t_copy_also_reaches_the_notebook)]

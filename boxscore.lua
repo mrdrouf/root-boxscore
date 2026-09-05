@@ -2736,43 +2736,21 @@ function rebuildUI()
     add('<VerticalLayout padding="12 12 10 8" spacing="5" childForceExpandHeight="false">')
     add('<Text fontSize="12" fontStyle="Bold" color="' .. PARCH .. '" preferredHeight="16"'
       .. ' alignment="MiddleLeft"' .. NOClick
-      .. '>JSON, ' .. #copyFieldText() .. ' chars &#183; 1-4 below: for each say its TEXT, or SHOWS-PLACEHOLDER, or NOTHING</Text>')
-    -- DOUBLE quotes, like every other element in this file -- this was the only one in 2900 lines
-    -- built with single quotes, which TTS's XmlUI does not accept, so not even id="cpyfld" parsed
-    -- and every setAttribute/setValue on it was a silent no-op.
+      .. '>the box-score record as JSON</Text>')
+    -- NO InputField. Measured over five rounds in the maintainer's own game: an InputField here
+    -- renders its PLACEHOLDER but never text set from script -- not via the text attribute, not as
+    -- inner text, not via setAttribute or setValue, with or without an id, in any container. The last
+    -- control was a byte-for-byte clone of this panel's own field carrying the word HELLO and showed
+    -- neither the word nor its placeholder. A permanently empty box is worse than no box.
     --
-    -- And the JSON does NOT go in the attribute. esc() rewrites every double quote as &#34;, and this
-    -- file's own hard-won comment records that TTS renders numeric entities literally -- a path no
-    -- WORKING field here has ever exercised, because a webhook URL, a thread link and a player name
-    -- contain no double quotes. A JSON payload is nothing but double quotes. So the element is
-    -- emitted empty and the text is pushed in afterwards, which never had a chance before: with the
-    -- id unparsed, the pushes had nothing to write to.
-    -- The JSON goes in as INNER TEXT, which is the one form not yet tried, and the evidence for it is
-    -- right above: the caption is a Text element carrying its content between the tags, and it has
-    -- rendered correctly in every screenshot. Element content is also where a double quote needs no
-    -- escaping at all -- it is only special inside an attribute -- which removes the whole problem
-    -- that killed the attribute route, since a JSON payload is nothing but double quotes.
-    -- MEASURED 2026-09-05: inner text does NOT populate an InputField. Probe A carried plain
-    -- "PLAIN-TEXT-CONTROL" between the tags and came up blank alongside the JSON probes, so the
-    -- documented <InputField>Default Text</InputField> form simply does not render here. Back to the
-    -- text ATTRIBUTE, which is the form every WORKING field in this file uses (player names, webhook,
-    -- thread) and which the docs also list.
-    add('<InputField id="cpyfld" fontSize="10" preferredHeight="104" lineType="MultiLineNewLine"'
-      .. ' colors="#F1E5C8|#FFFFFF|#FFFFFF|#00000000" textColor="' .. INKTXT .. '"'
-      .. ' placeholder="the export appears here"'
-      .. ' text="' .. esc(wrapJson(copyFieldText())) .. '"/>')
-
-    -- ONE probe left, and it is an exact clone of the field above -- same id shape, same container,
-    -- same colours, same multiline -- carrying a SHORT string. That is the single thing never tested:
-    -- every version so far gave the real field the full payload and nothing else, while the four
-    -- probe rounds were measured in containers or without ids and told us nothing.
-    --   clone shows HELLO, field above blank  -> it is the payload, and only the payload
-    --   both blank                            -> an InputField cannot be filled from script here
-    add('<Text fontSize="11" color="' .. PARCH .. '" preferredHeight="16" alignment="MiddleLeft"'
-      .. NOClick .. '>control: the same field, carrying the word HELLO</Text>')
-    add('<InputField id="cpyctl" fontSize="10" preferredHeight="26" lineType="MultiLineNewLine"'
-      .. ' colors="#F1E5C8|#FFFFFF|#FFFFFF|#00000000" textColor="' .. INKTXT .. '"'
-      .. ' placeholder="(control is empty)" text="HELLO"/>')
+    -- The notebook is not a fallback, it is the mechanism. TTS has no clipboard API; its notebook body
+    -- is a native text area that never touches the XML layer, and it has worked from the first try.
+    add('<Text fontSize="15" fontStyle="Bold" color="' .. GOLD .. '" preferredHeight="26"'
+      .. ' alignment="MiddleLeft"' .. NOClick .. '>Written to the Notebook, tab &#8220;BoxScore JSON&#8221;</Text>')
+    add('<Text fontSize="13" color="' .. PARCH .. '" preferredHeight="22" alignment="MiddleLeft"'
+      .. NOClick .. '>Open the Notebook at the top of the screen, click that tab, Ctrl+A, Ctrl+C.</Text>')
+    add('<Text fontSize="13" color="' .. PARCH .. '" preferredHeight="22" alignment="MiddleLeft"'
+      .. NOClick .. '>' .. #copyFieldText() .. ' characters, rewritten every time you press COPY.</Text>')
     fillCopyField()
     add('<HorizontalLayout preferredHeight="26" spacing="6" childForceExpandWidth="false">')
     add('<Text flexibleWidth="1"' .. NOClick .. '> </Text>')
