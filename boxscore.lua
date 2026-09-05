@@ -2720,7 +2720,7 @@ function rebuildUI()
     add('<VerticalLayout padding="12 12 10 8" spacing="5" childForceExpandHeight="false">')
     add('<Text fontSize="12" fontStyle="Bold" color="' .. PARCH .. '" preferredHeight="16"'
       .. ' alignment="MiddleLeft"' .. NOClick
-      .. '>the box-score record as JSON, ' .. #copyFieldText() .. ' chars &#8211; select all (Ctrl+A), copy (Ctrl+C) &#183; also in Notebook &#8594; &#8220;BoxScore JSON&#8221;</Text>')
+      .. '>JSON, ' .. #copyFieldText() .. ' chars &#183; A/B/C below are a one-off test &#8211; tell me which of the three show text</Text>')
     -- DOUBLE quotes, like every other element in this file -- this was the only one in 2900 lines
     -- built with single quotes, which TTS's XmlUI does not accept, so not even id="cpyfld" parsed
     -- and every setAttribute/setValue on it was a silent no-op.
@@ -2736,9 +2736,32 @@ function rebuildUI()
     -- rendered correctly in every screenshot. Element content is also where a double quote needs no
     -- escaping at all -- it is only special inside an attribute -- which removes the whole problem
     -- that killed the attribute route, since a JSON payload is nothing but double quotes.
-    add('<InputField id="cpyfld" fontSize="10" preferredHeight="130" lineType="MultiLineNewLine"'
-      .. ' colors="#F1E5C8|#FFFFFF|#FFFFFF|#00000000" textColor="' .. INKTXT .. '">'
+    -- The payload goes in with a LEADING SPACE. nolt #1317 reports an InputField blanking when the
+    -- text is a JSON object -- a bare "{}" does it -- and if that is really keyed on the opening
+    -- brace then a space in front sidesteps it. Leading whitespace is valid JSON, so what gets
+    -- copied still parses anywhere.
+    add('<InputField id="cpyfld" fontSize="10" preferredHeight="104" lineType="MultiLineNewLine"'
+      .. ' colors="#F1E5C8|#FFFFFF|#FFFFFF|#00000000" textColor="' .. INKTXT .. '"> '
       .. escInner(copyFieldText()) .. '</InputField>')
+
+    -- DIAGNOSTIC ROW. Four attempts have now been shipped blind because there is no way to run TTS
+    -- from here; this replaces the guessing with one controlled test. Each probe is the SAME element
+    -- as above carrying a different string, so one screenshot says exactly which forms display:
+    --   A shows, B blank            -> the opening brace is the trigger (nolt #1317), C proves the fix
+    --   A blank                     -> an InputField cannot take inner text at all; use the notebook
+    --   all show, real payload blank-> it is the payload's size or content, not the mechanism
+    local function probe(id, label, body)
+      add('<HorizontalLayout preferredHeight="22" spacing="4">')
+      add('<Text fontSize="10" color="' .. PARCH .. '" preferredWidth="150" alignment="MiddleRight"'
+        .. NOClick .. '>' .. label .. '</Text>')
+      add('<InputField id="' .. id .. '" fontSize="10" flexibleWidth="1"'
+        .. ' colors="#F1E5C8|#FFFFFF|#FFFFFF|#00000000" textColor="' .. INKTXT .. '">'
+        .. body .. '</InputField>')
+      add('</HorizontalLayout>')
+    end
+    probe("dbgA", "A plain text",        "PLAIN-TEXT-CONTROL")
+    probe("dbgB", "B json, leading {",   '{"a":1}')
+    probe("dbgC", "C json, leading sp",  ' {"a":1}')
     fillCopyField()
     add('<HorizontalLayout preferredHeight="26" spacing="6" childForceExpandWidth="false">')
     add('<Text flexibleWidth="1"' .. NOClick .. '> </Text>')

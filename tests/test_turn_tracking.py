@@ -269,6 +269,7 @@ def t_copy_field_uses_double_quoted_attributes(src):
     assert "text=" not in decl, \
         "the JSON is in an attribute again -- a quote is special there, and JSON is all quotes: %s" % decl[:160]
     assert "escInner(copyFieldText())" in decl, "the field is not carrying the JSON as inner text"
+    assert '"> ' in decl, "the leading space is gone -- it is what sidesteps the opening-brace bug"
     assert "</InputField>" in src, "the field is still self-closing, so it has no inner text"
 
     # and no element anywhere may drift back to single-quoted attributes
