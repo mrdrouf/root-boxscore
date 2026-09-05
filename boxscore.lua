@@ -2759,29 +2759,20 @@ function rebuildUI()
     -- thread) and which the docs also list.
     add('<InputField id="cpyfld" fontSize="10" preferredHeight="104" lineType="MultiLineNewLine"'
       .. ' colors="#F1E5C8|#FFFFFF|#FFFFFF|#00000000" textColor="' .. INKTXT .. '"'
-      .. ' placeholder="&#60;&#60;EMPTY&#62;&#62;"'
+      .. ' placeholder="the export appears here"'
       .. ' text="' .. esc(wrapJson(copyFieldText())) .. '"/>')
 
-    -- ROUND 5. Round 4 invalidated itself: probe 1 carried NO text attribute and still did not show
-    -- its placeholder, while the main field shows <<EMPTY>> perfectly. The difference is the
-    -- CONTAINER -- those probes sat in a HorizontalLayout, which renders a field's label but not the
-    -- field's own text. They are now emitted exactly like the main field: straight into this
-    -- VerticalLayout, multiline, same colours, differing only in the text attribute.
-    --
-    -- The leading hypothesis is now about the STRING rather than the markup. A JSON object contains
-    -- no space and no newline, so it is a single unbroken token thousands of characters long, and a
-    -- multiline field has nowhere to wrap it. Probe 4 carries the payload broken at commas.
-    local function probe5(label, attr)
-      add('<Text fontSize="11" color="' .. PARCH .. '" preferredHeight="14" alignment="MiddleLeft"'
-        .. NOClick .. '>' .. label .. '</Text>')
-      add('<InputField fontSize="12" preferredHeight="26" lineType="MultiLineNewLine"'
-        .. ' placeholder="SHOWS-PLACEHOLDER" colors="#FFFFFF|#FFFFFF|#FFFFFF|#FFFFFF"'
-        .. ' textColor="#000000"' .. attr .. '/>')
-    end
-    probe5("1 no text attr",     "")
-    probe5("2 text=HELLO",       ' text="HELLO"')
-    probe5("3 short json",       ' text="{&#34;a&#34;:1}"')
-    probe5("4 payload, wrapped", ' text="' .. esc(wrapJson(copyFieldText())) .. '"')
+    -- ONE probe left, and it is an exact clone of the field above -- same id shape, same container,
+    -- same colours, same multiline -- carrying a SHORT string. That is the single thing never tested:
+    -- every version so far gave the real field the full payload and nothing else, while the four
+    -- probe rounds were measured in containers or without ids and told us nothing.
+    --   clone shows HELLO, field above blank  -> it is the payload, and only the payload
+    --   both blank                            -> an InputField cannot be filled from script here
+    add('<Text fontSize="11" color="' .. PARCH .. '" preferredHeight="16" alignment="MiddleLeft"'
+      .. NOClick .. '>control: the same field, carrying the word HELLO</Text>')
+    add('<InputField id="cpyctl" fontSize="10" preferredHeight="26" lineType="MultiLineNewLine"'
+      .. ' colors="#F1E5C8|#FFFFFF|#FFFFFF|#00000000" textColor="' .. INKTXT .. '"'
+      .. ' placeholder="(control is empty)" text="HELLO"/>')
     fillCopyField()
     add('<HorizontalLayout preferredHeight="26" spacing="6" childForceExpandWidth="false">')
     add('<Text flexibleWidth="1"' .. NOClick .. '> </Text>')
