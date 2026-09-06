@@ -31,7 +31,13 @@ end
 function __row(i)
   local r = S.rows[i]; if r == nil then return nil end
   local n = 0; for _ in pairs(r.locks or {}) do n = n + 1 end
-  return { fac = r.fac, color = tostring(r.color), locks = n }
+  return { fac = r.fac, color = tostring(r.color), locks = n, variant = tostring(r.variant or "") }
+end
+function __factions()
+  local p = tournamentPayload()
+  local t = {}
+  for _, e in ipairs(p.participants or {}) do t[#t+1] = tostring(e.faction) end
+  table.sort(t) return table.concat(t, ",")
 end
 function __poll() poll() end
 function __round() return S.round end
@@ -637,6 +643,66 @@ def t_old_save_migrates_to_the_explicit_round(src):
         "a resumed game locked into a finished column instead of round 3: %s" % cols[:4])
 
 
+def t_two_vagabonds_are_two_rows(src):
+    """Root allows two vagabonds, and the faction ships two score markers for exactly that.
+
+    A box-score row IS its marker's name, so while both markers were called "Vagabond VP" the two
+    players collapsed onto ONE row: the second had no score line at all, and both markers read into
+    the first, so its score jumped around as the marker search re-pointed. RTT now spawns one marker
+    per vagabond seat -- white for the first, black for the second -- and names the second
+    "Vagabond 2 VP".
+
+    Geometry cannot separate them: both seats share the same board ARTWORK, so the anchor search
+    hands both rows the same object. The character therefore comes from RTT's record, not from
+    measuring which pawn is nearest.
+    """
+    rt = lupa.LuaRuntime(unpack_returned_tuples=True)
+    rt.execute(open(os.path.join(HERE, "tts_stub.lua"), encoding="utf-8").read())
+    rt.execute(src + PROBE)
+    rt.execute('''
+      local map = __H.obj("Marsh Map","map001",{x=0,y=0,z=0})
+      local sp = {}
+      for _, z in ipairs({-0.05, 0.0, 0.05}) do
+        for i = 0, 30 do sp[#sp+1] = { position = { x = i*0.03, y = 0, z = z } } end
+      end
+      map._snaps = sp
+      for _, n in ipairs({"Vagabond VP", "Vagabond 2 VP"}) do
+        local o = __H.obj(n, "vp_" .. n, {x=0.90, y=0, z=0.0})
+        o.held_by_color = nil
+        o.isSmoothMoving = function() return false end
+      end
+      __H.seated = { {color="Purple",seated=true,steam_name="H1"},
+                     {color="Blue",  seated=true,steam_name="H2"} }
+    ''')
+    rt.globals().onLoad("")
+    rt.globals().__H.flush(20)
+    for _ in range(6):
+        rt.globals().__poll(); rt.globals().__H.flush(3)
+
+    rec = ('{"run":3,"seats":['
+           '{"pos":[52,-46],"color":"Purple","faction":"Ranger","key":"Vagabond","owner":"H1"},'
+           '{"pos":[-52,-46],"color":"Blue","faction":"Thief","key":"Vagabond 2","owner":"H2"}]}')
+    rt.execute("rttSeatPush(%s)" % _lua_str(rec))
+    for _ in range(4):
+        rt.globals().__poll(); rt.globals().__H.flush(3)
+
+    n = dict(rt.eval("__probe()"))["rows"]
+    assert n == 2, "two vagabonds produced %d row(s) -- one player has no score line" % n
+    seen = {}
+    for i in (1, 2):
+        r = dict(rt.eval("__row(%d)" % i))
+        seen[r["fac"]] = r["color"]
+    assert set(seen) == {"Vagabond", "Vagabond 2"}, "rows are %s" % list(seen)
+    assert seen["Vagabond"] == "Purple" and seen["Vagabond 2"] == "Blue", \
+        "the two vagabonds did not take their own seats' colours: %s" % seen
+    # the character comes from the record, so the two are not both shown as the same vagabond
+    chars = sorted(dict(rt.eval("__row(%d)" % i))["variant"] for i in (1, 2))
+    assert chars == ["Ranger", "Thief"], "characters came out as %s" % chars
+    # both export as the ONE vagabond faction; the character and player tell them apart
+    assert rt.eval("__factions()") == "vagabond,vagabond", \
+        "exported factions %s" % rt.eval("__factions()")
+
+
 DIRECT += [("turns switched on after setup",  t_turns_enabled_after_the_sheet_is_already_up),
            ("export emits the full schema",   t_export_emits_the_full_schema),
            ("one record, one notebook tab",    t_export_is_one_record_to_one_tab),
@@ -649,7 +715,8 @@ DIRECT += [("turns switched on after setup",  t_turns_enabled_after_the_sheet_is
            ("row joining does not remap",      t_a_row_appearing_midgame_does_not_remap_columns),
            ("declaring a round shifts nobody", t_declaring_the_round_does_not_shift_half_the_table),
            ("pushed record wins and persists", t_the_pushed_seat_record_wins_and_survives_a_reload),
-           ("old save migrates its round",     t_old_save_migrates_to_the_explicit_round)]
+           ("old save migrates its round",     t_old_save_migrates_to_the_explicit_round),
+           ("two vagabonds are two rows",      t_two_vagabonds_are_two_rows)]
 
 
 CASES = [

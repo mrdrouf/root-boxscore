@@ -82,9 +82,20 @@ local DECK_BACKS = {
 local CHARS = { "Thief", "Tinker", "Ranger", "Vagrant", "Arbiter", "Scoundrel",
   "Adventurer", "Ronin", "Harrier", "Jailor", "Cheat", "Gladiator" }
 
+-- TWO VAGABONDS ARE TWO ROWS. Root allows two, and the faction ships two score markers -- a white one
+-- and a black one -- for exactly that. A box-score row IS its marker's name, so the second vagabond's
+-- marker is named "Vagabond 2 VP" and its row is "Vagabond 2"; anything else and both players collapse
+-- onto one row, with the second showing no score at all and both markers reading into the first.
+-- Every rule that asks "is this a vagabond?" therefore has to ask about the BASE faction.
+local function baseFac(fac)
+  if type(fac) ~= "string" then return fac end
+  return (fac:gsub("%s+%d+$", ""))
+end
+
 -- which factions carry a pickable detail, and its options
 local LEADERS = { "Builder", "Charismatic", "Commander", "Despot" }
 local function variantOptions(fac)
+  fac = baseFac(fac)
   if fac == "Eyrie" then return LEADERS end
   if fac == "Vagabond" or fac == "Knaves" then return CHARS end
   return nil
@@ -511,7 +522,7 @@ end
 local COALITION_FACTIONS = { Vagabond = true, Knaves = true }
 
 local function canCoalition(row)
-  return row ~= nil and COALITION_FACTIONS[row.fac] == true
+  return row ~= nil and COALITION_FACTIONS[baseFac(row.fac)] == true
 end
 
 local function coalitionCandidates(row)
@@ -661,6 +672,7 @@ local BOARD_ART = {
 
 local function facAnchor(fac, byName)
   byName = byName or {}   -- defensive: never index a nil table (audit: seat-box crash)
+  fac = baseFac(fac)      -- "Vagabond 2" has no pieces of its own; it uses the vagabond's
   local o = byName[fac .. " Supply"]
   if o == nil and SUPPLY_ALIAS[fac] ~= nil then
     o = byName[SUPPLY_ALIAS[fac] .. " Supply"]
@@ -692,6 +704,11 @@ local function facAnchor(fac, byName)
   return o
 end
 
+-- Assigned further down, once rttFieldMap exists. Declared HERE because refreshVariants is above it
+-- and a `local` referenced before its declaration compiles to a nil GLOBAL -- the "local declared
+-- after use" trap this file has shipped twice.
+local rttCharOf = nil
+
 -- Best effort: find the chosen vagabond character / captain card standing
 -- near the faction's supply. Fills the variant only while it is auto-managed;
 -- a hand-typed variant always wins.
@@ -699,7 +716,14 @@ local function refreshVariants(byName)
   local changed = false
   for _, row in ipairs(S.rows) do
     if row.variantAuto ~= false then
-      local bag = facAnchor(row.fac, byName)
+      -- RTT knows exactly which character each seat is playing, so ask it before measuring anything.
+      -- Geometry cannot separate two vagabonds: they share one board ART, so facAnchor hands BOTH
+      -- rows the same object and the nearest-pawn search would give them the same character.
+      local told = rttCharOf ~= nil and rttCharOf(row.fac) or nil
+      if told ~= nil and told ~= "" and row.variant ~= told then
+        row.variant = told; changed = true
+      end
+      local bag = (told == nil or told == "") and facAnchor(row.fac, byName) or nil
       if bag then
         local bp = bag.getPosition()
         local best, bestD = nil, 18 * 18
@@ -835,19 +859,39 @@ local function rttRecord()
   return nil
 end
 
--- faction -> field, straight off the record.
+-- ROW NAME -> field, straight off the record.
+--
+-- Keyed by the seat's `key`, NOT its `faction`. They differ for exactly the case this whole section
+-- exists for: a vagabond seat's `faction` is the CHARACTER it is playing ("Ranger") while its `key`
+-- is the row the sheet shows ("Vagabond", or "Vagabond 2" for the second). Keying by faction here
+-- built a map nothing could look itself up in -- refreshSeats asks for rttCol["Vagabond"] and would
+-- have found only rttCol["Ranger"], so a vagabond row silently lost its colour, its owner and its
+-- position and fell back to the geometric guess. `faction` is still readable through this, which is
+-- how the character reaches the variant column.
 local function rttFieldMap(field)
   local rec = rttRecord()
   if rec == nil then return nil end
   local m, any = {}, false
   for _, e in ipairs(rec.seats) do
-    if type(e) == "table" and e.faction ~= nil and e.faction ~= ""
-       and e[field] ~= nil and e[field] ~= "" then
-      m[e.faction] = e[field]; any = true
+    local k = (type(e) == "table") and ((e.key ~= nil and e.key ~= "") and e.key or e.faction) or nil
+    if k ~= nil and k ~= "" and e[field] ~= nil and e[field] ~= "" then
+      m[k] = e[field]; any = true
     end
   end
   if not any then return nil end
   return m
+end
+
+-- The character RTT recorded for a seat -- "Thief", "Ranger" -- looked up by the row's name. Only a
+-- vagabond (or the Knaves) has one; every other faction's `faction` field is its own name, which is
+-- not a character, so it is filtered against the known list.
+rttCharOf = function(fac)
+  local m = rttFieldMap("faction")
+  if m == nil then return nil end
+  local v = m[fac]
+  if v == nil then return nil end
+  for _, c in ipairs(CHARS) do if c == v then return v end end
+  return nil
 end
 
 -- RTT publishes each faction's exact seat position (faction id -> {x,z}) via
@@ -1248,9 +1292,9 @@ function tournamentPayload()
   }
   for _, fac in ipairs(ROSTER) do
     if S.unpicked[fac] == true then
-      p.undrafted_faction = FACTION_SLUG[fac] or slug(fac)
+      p.undrafted_faction = FACTION_SLUG[baseFac(fac)] or slug(baseFac(fac))
       local v = S.unpickedVar and S.unpickedVar[fac] or ""
-      if v ~= "" and (fac == "Vagabond" or fac == "Knaves") then p.undrafted_vagabond = slug(v) end
+      if v ~= "" and (baseFac(fac) == "Vagabond" or baseFac(fac) == "Knaves") then p.undrafted_vagabond = slug(v) end
       break
     end
   end
@@ -1275,7 +1319,9 @@ function tournamentPayload()
       player            = (row.player ~= nil and row.player ~= "") and row.player or JNULL,
       player_steam_id   = steamIdFor(row.color) or JNULL,
       coalition         = (row.coalition ~= nil) and (FACTION_SLUG[row.coalition] or slug(row.coalition)) or JNULL,
-      faction           = FACTION_SLUG[row.fac] or slug(row.fac),
+      -- baseFac: two vagabonds are two ROWS but ONE faction. The export must say "vagabond" for
+      -- both -- the character and the player name are what distinguish them.
+      faction           = FACTION_SLUG[baseFac(row.fac)] or slug(baseFac(row.fac)),
       dominance         = JNULL,
       vagabond          = JNULL,
       captains          = JLIST,              -- not tracked
@@ -1288,7 +1334,7 @@ function tournamentPayload()
     }
     if row.variant ~= nil and row.variant ~= "" then
       if row.fac == "Eyrie" then e.starting_leader = row.variant
-      elseif row.fac == "Vagabond" or row.fac == "Knaves" then e.vagabond = slug(row.variant) end
+      elseif baseFac(row.fac) == "Vagabond" or baseFac(row.fac) == "Knaves" then e.vagabond = slug(row.variant) end
     end
     if row.dom ~= nil then
       if row.dom.suit ~= nil then
