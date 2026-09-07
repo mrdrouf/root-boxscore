@@ -3215,8 +3215,23 @@ function onLoad(saved)
   self.addContextMenuItem("diagnose", uiDiag, false)
   self.addContextMenuItem("re-detect seats", uiReseat, false)
 
-  Wait.time(function()
+  -- BUILD AS SOON AS THE MAP IS THERE, not after a flat two seconds.
+  --
+  -- findTrack reads the printed 0-30 score track off the map board's snap points, so it needs the map
+  -- to exist. That was waited for with Wait.time(..., 2), which left the sheet BLANK for two seconds
+  -- on every spawn -- maintainer, 2026-09-06: "do you know why landmarks and also the boxscore takes
+  -- a bit of time to load?" -- and was still only a guess: on a slow load two seconds is too SHORT,
+  -- and the track then stays unfound until the first poll a further 1.2s later.
+  --
+  -- Polled every 5 frames, not every frame: findTrack walks every object on the table asking for snap
+  -- points and runs detectTrackOn over the plausible ones, which is not cheap. RTT spawns this sheet
+  -- three frames after the map is requested, so the usual case is one or two looks. After ~5s it
+  -- gives up and builds anyway; the sheet is then live and poll picks the track up when it appears.
+  local tries = 0
+  local function build()
+    tries = tries + 1
     findTrack()
+    if TRACK == nil and tries < 60 then Wait.frames(build, 5) return end
     for _, row in ipairs(S.rows) do
       local m = findMarker(row)
       if m then row.iconUrl = markerImage(m) end
@@ -3224,5 +3239,6 @@ function onLoad(saved)
     refreshAssets()
     rebuildUI()
     Wait.time(poll, POLL_SECONDS, -1)
-  end, 2)
+  end
+  Wait.frames(build, 1)
 end
