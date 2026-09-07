@@ -2768,8 +2768,9 @@ function rebuildUI()
     if row.dom ~= nil then
       add('<VerticalLayout preferredWidth="' .. domW
         .. '" spacing="1" childForceExpandHeight="false">')
+      -- 14, not 16: the button below now takes two lines and the row is still 40 tall.
       add('<Text fontSize="9" fontStyle="Bold" color="' .. RUST
-        .. '" preferredHeight="16" alignment="MiddleCenter"' .. NOClick .. '>dom '
+        .. '" preferredHeight="14" alignment="MiddleCenter"' .. NOClick .. '>dom '
         .. esc(row.dom.suit) .. ' T' .. tostring(row.dom.turn) .. '</Text>')
       if canCoalition(row) then
         -- a vagabond's dominance card buys a coalition, never a dominance win
@@ -2777,9 +2778,13 @@ function rebuildUI()
           .. ((row.coalition ~= nil) and BTN_GOLD or BTN_SOFT)
           .. ' text="' .. esc(row.coalition and ("+" .. row.coalition) or "coalition") .. '" onClick="uiRowBtn"/>')
       else
-        add('<Button id="domwin_' .. i .. '" fontSize="10" fontStyle="Bold" preferredHeight="18" '
+        -- TWO LINES. Maintainer, 2026-09-06: "the boxscore should write dom win on two line not only
+        -- on 1 line". It stopped fitting on one when this column went from 70 wide to 52 to make room
+        -- for the turn-time column, so the label was being clipped. &#xA; is the line break TTS's XML
+        -- takes; 24 tall holds two lines of 10pt, and 14 + 24 + 1 spacing still sits inside rowH 40.
+        add('<Button id="domwin_' .. i .. '" fontSize="10" fontStyle="Bold" preferredHeight="24" '
           .. ((row.dom.won == true) and BTN_GOLD or BTN_SOFT)
-          .. ' text="dom win" onClick="uiRowBtn"/>')
+          .. ' text="dom&#xA;win" onClick="uiRowBtn"/>')
       end
       add('</VerticalLayout>')
     else
