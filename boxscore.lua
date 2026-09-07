@@ -1983,6 +1983,30 @@ end
 
 function uiEndTurn() lockActive() end
 
+-- ---- called by the table's TURN PANEL (RTT_TURN_PANEL_JSON) ------------------------------------
+-- The panel is a separate object, so it reaches the sheet the way RTT does: obj.call by name.
+
+-- Which round the sheet believes it is on. The panel displays THIS rather than counting itself, so
+-- the two can never drift apart -- the maintainer asked for the panel to use "the boxscore turn
+-- counter", not a second one.
+function rttRound() return currentRound() end
+
+-- Force round 1, first seat, and restart the turn clock. Maintainer, 2026-09-06, on why the panel's
+-- START TURN 1 button should force rather than merely check: "yes force because sometimes boxscore
+-- gets still confused." Clears the recorded turn lengths too, since they belong to the game that just
+-- ended, not the one starting.
+function rttStartTurnOne()
+  S.round = 1
+  S.active = 1
+  S.turnStart = now()
+  for _, row in ipairs(S.rows or {}) do
+    row.lastTurn = nil
+    row.lastRound = nil
+  end
+  pcall(function() rebuildUI() end)
+  return true
+end
+
 function onPlayerTurn(player, previous)
   dbg("BoxScore onPlayerTurn: now=" .. tostring(player and player.color)
     .. " prev=" .. tostring(previous and previous.color)
