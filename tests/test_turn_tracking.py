@@ -31,7 +31,8 @@ end
 function __row(i)
   local r = S.rows[i]; if r == nil then return nil end
   local n = 0; for _ in pairs(r.locks or {}) do n = n + 1 end
-  return { fac = r.fac, color = tostring(r.color), locks = n, variant = tostring(r.variant or "") }
+  return { fac = r.fac, color = tostring(r.color), locks = n, variant = tostring(r.variant or ""),
+           lastTurn = r.lastTurn or -1 }
 end
 function __factions()
   local p = tournamentPayload()
@@ -447,6 +448,52 @@ def t_turns_enabled_after_the_sheet_is_already_up(src):
     assert locks == 4, "a full round locked %d scores, expected 4" % locks
 
 
+
+def t_each_player_s_previous_turn_is_timed(src):
+    """Every seated player's PREVIOUS turn length is recorded, for the column beside their name.
+
+    Maintainer, 2026-09-06: he asked for a clock on the table showing each player's turn, then --
+    "actually that could be written on the boxscore instead. at the right of the player s name". The
+    turn system already says exactly when a turn ends, so the sheet times itself and needs nothing from
+    the table panel.
+
+    The clock is stubbed so the durations are exact: a real run would measure zero, because the harness
+    fires the passes back to back.
+    """
+    rt = lupa.LuaRuntime(unpack_returned_tuples=True)
+    rt.execute(open(os.path.join(HERE, "tts_stub.lua"), encoding="utf-8").read())
+    rt.execute(src + PROBE)
+    L, H = rt.globals(), rt.globals().__H
+    order = ["Red", "Yellow", "Orange", "Teal"]
+    rt.execute(build_setup(FACTIONS, order))
+    rt.execute("__T = 1000 os.time = function() return __T end")   # a clock we control
+    rt.execute('Turns.type = 2; Turns.skip_empty_hands = false; '
+               'Turns.order = {"Red","Yellow","Orange","Teal"}; '
+               'Turns.turn_color = "Red"; Turns.enable = true')
+    L.onLoad("")
+    H.flush(20)
+    for _ in range(6):
+        L.__poll(); H.flush(3)
+
+    L.onPlayerTurn(rt.table(color="Red", seated=True), None)   # opens; nothing to time yet
+    H.flush(3)
+    TOOK = {"Red": 65, "Yellow": 30, "Orange": 125, "Teal": 7}
+    for nxt, prev in (("Yellow", "Red"), ("Orange", "Yellow"), ("Teal", "Orange"), ("Red", "Teal")):
+        rt.execute("__T = __T + %d" % TOOK[prev])
+        L.onPlayerTurn(rt.table(color=nxt, seated=True), rt.table(color=prev, seated=True))
+        H.flush(3); L.__poll(); H.flush(3)
+
+    got = {}
+    for i in range(1, 5):
+        r = L.__row(i)
+        if r:
+            r = dict(r)
+            got[r["color"]] = r["lastTurn"]
+    for color, secs in TOOK.items():
+        assert got.get(color) == secs, (
+            "%s's previous turn recorded as %s, expected %d (all: %s)"
+            % (color, got.get(color), secs, got))
+
 def _table(src, factions, seated_colors, order):
     """A live sheet with the turn system running, ready to be poked at."""
     rt = lupa.LuaRuntime(unpack_returned_tuples=True)
@@ -715,6 +762,7 @@ DIRECT += [("turns switched on after setup",  t_turns_enabled_after_the_sheet_is
            ("row joining does not remap",      t_a_row_appearing_midgame_does_not_remap_columns),
            ("declaring a round shifts nobody", t_declaring_the_round_does_not_shift_half_the_table),
            ("pushed record wins and persists", t_the_pushed_seat_record_wins_and_survives_a_reload),
+    ("each turn is timed",        t_each_player_s_previous_turn_is_timed),
            ("old save migrates its round",     t_old_save_migrates_to_the_explicit_round),
            ("two vagabonds are two rows",      t_two_vagabonds_are_two_rows)]
 

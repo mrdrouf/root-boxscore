@@ -208,6 +208,14 @@ local pollCount = 0
 ------------------------------------------------------------------- utilities --
 local function now() return os.time() end
 
+-- A turn length as m:ss, or blank when the player has not finished one yet. Minutes are not capped: a
+-- long think reads 12:07 rather than wrapping.
+local function mmss(secs)
+  local n = tonumber(secs)
+  if n == nil or n < 0 then return " " end
+  return string.format("%d:%02d", math.floor(n / 60), n % 60)
+end
+
 local function clampSizePct(value)
   return math.max(SIZE_MIN_PCT, math.min(SIZE_MAX_PCT,
     math.floor((tonumber(value) or 100) + 0.5)))
@@ -1988,10 +1996,19 @@ function onPlayerTurn(player, previous)
   -- row" keeps the original protection (toggling the turn system bursts through colours that have no
   -- row, and those still lock nothing) while letting a seat's turn count whether or not a human sits
   -- in it. In a full game every seat is occupied, so nothing changes there.
-  if previous == nil or previous.color == nil then return end
+  -- HOW LONG THAT TURN TOOK. Maintainer, 2026-09-06: he wants each seated player's previous turn
+  -- duration on the sheet, "at the right of the player s name". The turn system already says exactly
+  -- when one turn ends and the next begins, so the sheet times itself and needs nothing from the table
+  -- panel. Second resolution (now() is os.time), which is all a turn length needs.
+  local tNow = now()
+  if previous == nil or previous.color == nil then S.turnStart = tNow return end
   -- A pass by a seated color with no faction row (an observer) locks nothing.
   local i = rowByColor(previous.color)
-  if i then lockRow(i) end
+  if i then
+    lockRow(i)
+    if S.turnStart ~= nil and tNow >= S.turnStart then S.rows[i].lastTurn = tNow - S.turnStart end
+  end
+  S.turnStart = tNow
   -- sync the pointer immediately instead of waiting for the next poll
   local j = player and player.color and rowByColor(player.color) or nil
   if j then S.active = j end
@@ -2567,9 +2584,12 @@ function rebuildUI()
   -- sheet widen silently as the game went on.
   local showR = math.min((S.cols or 10) + 1, 41)
   local cellW = showR > 14 and 36 or 44
-  local iconW, facW, domW, nameW, liveW = 30, 118, 70, 130, 48
+  -- timeW is the previous-turn column, taken OUT of domW rather than added to the sheet's width: the
+  -- dominance column is 70 wide and empty in most rows, which is the gap the maintainer pointed at --
+  -- "a lot of space between faction name and players name".
+  local iconW, facW, domW, nameW, liveW, timeW = 30, 118, 52, 130, 48, 44
   local btnW = 117
-  local W = 54 + iconW + facW + domW + nameW + (showR - 1) * cellW + liveW + btnW
+  local W = 54 + iconW + facW + domW + nameW + timeW + (showR - 1) * cellW + liveW + btnW
   local rowH, headH = 40, 26
   local nMin = renderMinRows()
   local H = 56 + headH + math.max(nMin, #S.rows) * (rowH + 3) + 42
@@ -2676,6 +2696,7 @@ function rebuildUI()
   add('<Text preferredWidth="' .. facW .. '"' .. NOClick .. '> </Text>')
   add('<Text preferredWidth="' .. domW .. '"' .. NOClick .. '> </Text>')
   add('<Text preferredWidth="' .. nameW .. '"' .. NOClick .. '> </Text>')
+  add('<Text preferredWidth="' .. timeW .. '"' .. NOClick .. '> </Text>')
   local curRound = currentRound()
   for r = 1, showR - 1 do
     local isCur = (r == curRound)
@@ -2773,6 +2794,9 @@ function rebuildUI()
       add('<Text fontSize="15" color="' .. RUST .. '" alignment="MiddleCenter" preferredWidth="' .. nameW
         .. '"' .. NOClick .. '>' .. esc(row.player) .. '</Text>')
     end
+    -- that player's PREVIOUS turn, m:ss. Blank until they have finished one.
+    add('<Text fontSize="13" color="' .. INKTXT .. '" alignment="MiddleCenter" preferredWidth="' .. timeW
+      .. '"' .. NOClick .. '>' .. mmss(row.lastTurn) .. '</Text>')
     local craftIcons = {}
     if S.experimental then
       for _, c in ipairs(row.crafts or {}) do
